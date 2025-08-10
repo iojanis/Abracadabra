@@ -1,0 +1,46 @@
+{
+  "server": {
+    "port": 8787,
+    "host": "0.0.0.0"
+  },
+
+  "database": {
+    "kv_path": "./data/abracadabra.db"
+  },
+
+  "authentication": {
+    "jwt_secret": "CHANGE_THIS_IN_PRODUCTION_TO_A_SECURE_RANDOM_STRING",
+    "session_timeout": 2592000
+  },
+
+  "documents": {
+    "max_nesting_depth": 10,
+    "max_document_size": 10485760,
+    "max_collaborators_per_doc": 50
+  },
+
+  "file_storage": {
+    "upload_strategy": "local",
+    "local_upload_path": "./uploads",
+    "s3_bucket": "",
+    "s3_region": "us-east-1",
+    "s3_access_key": "",
+    "s3_secret_key": ""
+  },
+
+  "logging": {
+    "log_level": "INFO"
+  },
+
+  "features": {
+    "enable_public_documents": true,
+    "enable_webhooks": true,
+    "enable_scripting": true,
+    "enable_file_uploads": true
+  },
+
+  "rate_limiting": {
+    "rate_limit_window_ms": 60000,
+    "rate_limit_max_requests": 100
+  }
+}

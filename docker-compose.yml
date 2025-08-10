@@ -1,0 +1,222 @@
+# Docker Compose configuration for Abracadabra Server
+# Includes main application and supporting services
+
+version: '3.8'
+
+services:
+  # Main Abracadabra application
+  abracadabra-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: abracadabra-server
+    restart: unless-stopped
+    ports:
+      - "${ABRACADABRA_PORT:-8787}:8787"
+    environment:
+      # Server Configuration
+      DENO_ENV: production
+      ABRACADABRA_HOST: 0.0.0.0
+      ABRACADABRA_PORT: 8787
+
+      # Database Configuration
+      ABRACADABRA_KV_PATH: /app/data/kv/abracadabra.db
+
+      # File Upload Configuration
+      ABRACADABRA_UPLOAD_PATH: /app/uploads
+      ABRACADABRA_MAX_FILE_SIZE: ${MAX_FILE_SIZE:-10485760}
+
+      # Security Configuration
+      ABRACADABRA_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-this-in-production}
+      ABRACADABRA_SESSION_TIMEOUT: ${SESSION_TIMEOUT:-2592000}
+
+      # Logging Configuration
+      ABRACADABRA_LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ABRACADABRA_LOG_FILE: /app/data/logs/abracadabra.log
+
+      # Document Configuration
+      ABRACADABRA_MAX_NESTING_DEPTH: ${MAX_NESTING_DEPTH:-10}
+      ABRACADABRA_MAX_DOCUMENT_SIZE: ${MAX_DOCUMENT_SIZE:-5242880}
+      ABRACADABRA_MAX_COLLABORATORS: ${MAX_COLLABORATORS:-50}
+
+      # Real-time Configuration
+      ABRACADABRA_HOCUSPOCUS_PORT: ${HOCUSPOCUS_PORT:-1234}
+      ABRACADABRA_WEBSOCKET_TIMEOUT: ${WEBSOCKET_TIMEOUT:-30000}
+
+      # CORS Configuration
+      ABRACADABRA_CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+
+      # Optional S3 Configuration
+      ABRACADABRA_USE_S3: ${USE_S3:-false}
+      ABRACADABRA_S3_BUCKET: ${S3_BUCKET:-}
+      ABRACADABRA_S3_REGION: ${S3_REGION:-}
+      ABRACADABRA_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      ABRACADABRA_S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+
+      # Script Execution Configuration
+      ABRACADABRA_SCRIPT_TIMEOUT: ${SCRIPT_TIMEOUT:-30000}
+      ABRACADABRA_ALLOWED_DOMAINS: ${ALLOWED_DOMAINS:-api.github.com,httpbin.org}
+    volumes:
+      # Persistent data storage
+      - kv-data:/app/data/kv
+      - upload-data:/app/uploads
+      - log-data:/app/data/logs
+
+      # Configuration files (optional)
+      - ./config:/app/config:ro
+    networks:
+      - abracadabra-network
+    healthcheck:
+      test: ["CMD", "deno", "run", "--allow-net", "--allow-env", "--eval", "fetch('http://localhost:8787/health').then(r => r.ok ? Deno.exit(0) : Deno.exit(1)).catch(() => Deno.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - kv-backup
+    labels:
+      - "com.abracadabra.service=app"
+      - "com.abracadabra.version=1.0.0"
+
+  # KV Database backup and maintenance service
+  kv-backup:
+    image: denoland/deno:1.40.2
+    container_name: abracadabra-kv-backup
+    restart: unless-stopped
+    environment:
+      - BACKUP_INTERVAL=${BACKUP_INTERVAL:-3600}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - KV_PATH=/app/data/kv/abracadabra.db
+      - BACKUP_PATH=/app/data/backups
+    volumes:
+      - kv-data:/app/data/kv:ro
+      - backup-data:/app/data/backups
+      - ./scripts:/app/scripts:ro
+    networks:
+      - abracadabra-network
+    command: >
+      sh -c "
+        echo 'KV Backup Service Starting...';
+        mkdir -p /app/data/backups;
+        while true; do
+          echo 'Creating backup at $(date)';
+          if [ -f /app/data/kv/abracadabra.db ]; then
+            cp /app/data/kv/abracadabra.db /app/data/backups/abracadabra_$(date +%Y%m%d_%H%M%S).db;
+            echo 'Backup created successfully';
+
+            # Clean old backups
+            find /app/data/backups -name 'abracadabra_*.db' -mtime +$${BACKUP_RETENTION_DAYS} -delete;
+            echo 'Old backups cleaned';
+          else
+            echo 'KV database not found, skipping backup';
+          fi;
+
+          sleep $${BACKUP_INTERVAL};
+        done
+      "
+    labels:
+      - "com.abracadabra.service=kv-backup"
+
+  # Web proxy for production deployments (optional)
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: abracadabra-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx-cache:/var/cache/nginx
+    networks:
+      - abracadabra-network
+    depends_on:
+      - abracadabra-app
+    labels:
+      - "com.abracadabra.service=proxy"
+    profiles:
+      - production
+      - proxy
+
+  # Monitoring service (optional)
+  monitoring:
+    image: prom/prometheus:latest
+    container_name: abracadabra-monitoring
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - abracadabra-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+# Network configuration
+networks:
+  abracadabra-network:
+    driver: bridge
+    labels:
+      - "com.abracadabra.network=main"
+
+# Volume configuration
+volumes:
+  # KV database storage
+  kv-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${KV_DATA_PATH:-./data/kv}
+    labels:
+      - "com.abracadabra.volume=kv-data"
+
+  # File upload storage
+  upload-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${UPLOAD_DATA_PATH:-./data/uploads}
+    labels:
+      - "com.abracadabra.volume=upload-data"
+
+  # Log storage
+  log-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${LOG_DATA_PATH:-./data/logs}
+    labels:
+      - "com.abracadabra.volume=log-data"
+
+  # Backup storage
+  backup-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${BACKUP_DATA_PATH:-./data/backups}
+    labels:
+      - "com.abracadabra.volume=backup-data"
+
+  # Nginx cache (for proxy profile)
+  nginx-cache:
+    driver: local
+    labels:
+      - "com.abracadabra.volume=nginx-cache"
+
+  # Prometheus data (for monitoring profile)
+  prometheus-data:
+    driver: local
+    labels:
+      - "com.abracadabra.volume=prometheus-data"
