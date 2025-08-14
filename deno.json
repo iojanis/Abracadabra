@@ -23,13 +23,12 @@
     "y-protocols": "npm:y-protocols@^1.0.6",
     "lucia": "npm:lucia@^3.2.1",
     "@casl/ability": "npm:@casl/ability@^6.7.1",
-    "logtape": "jsr:@logtape/logtape@^0.7.2",
-    "argon2": "npm:@node-rs/argon2@^1.8.3"
+    "logtape": "jsr:@logtape/logtape@^0.7.2"
   },
   "tasks": {
-    "dev": "deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi --unstable-kv --watch src/main.ts",
-    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi --unstable-kv src/main.ts",
-    "build": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-ffi --unstable-kv --output dist/abracadabra src/main.ts",
+    "dev": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv --watch src/main.ts",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv src/main.ts",
+    "build": "deno compile --allow-net --allow-read --allow-write --allow-env --unstable-kv --output dist/abracadabra src/main.ts",
     "check": "deno check src/main.ts",
     "lint": "deno lint src/",
     "fmt": "deno fmt src/",

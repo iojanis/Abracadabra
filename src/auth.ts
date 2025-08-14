@@ -1,7 +1,7 @@
 // Authentication Service for Abracadabra Server
 // Handles user registration, login, session management using Lucia Auth v3
 
-import { hash, verify } from "argon2";
+import { hash, verify, validatePasswordStrength } from "./utils/password.ts";
 import { ERROR_CODES } from "./types/index.ts";
 import type {
   UserObject,
@@ -640,18 +640,11 @@ export class AuthService {
     }
 
     // Password validation
-    if (!data.password || data.password.length < 8) {
+    const passwordValidation = validatePasswordStrength(data.password);
+    if (!passwordValidation.valid) {
       return {
         valid: false,
-        error: "Password must be at least 8 characters long",
-      };
-    }
-
-    // Check for at least one letter and one number
-    if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(data.password)) {
-      return {
-        valid: false,
-        error: "Password must contain at least one letter and one number",
+        error: passwordValidation.errors[0], // Return first error
       };
     }
 

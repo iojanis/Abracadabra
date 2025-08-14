@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { validator } from "hono/validator";
 import { z } from "zod";
-import * as argon2 from "argon2";
+import { hash, verify } from "../utils/password.ts";
 import type {
   PermissionLevel,
   UserObject,
@@ -649,7 +649,7 @@ export class AuthRoutes {
           }
 
           // Verify current password
-          const validPassword = await argon2.verify(
+          const validPassword = await verify(
             user.hashedPassword,
             data.currentPassword,
           );
@@ -667,7 +667,7 @@ export class AuthRoutes {
           }
 
           // Hash new password
-          const hashedPassword = await argon2.hash(data.newPassword);
+          const hashedPassword = await hash(data.newPassword);
 
           // Update user
           const updatedUser: UserObject = {
