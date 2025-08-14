@@ -54,9 +54,18 @@ export class ConfigService {
 
     try {
       const kvKey = ["config", key] as const;
+      logger.debug("Config get operation", { key, kvKey });
       const result = await this.kv.get(kvKey);
+      logger.debug("Config get result", {
+        key,
+        result: result
+          ? { value: result.value, versionstamp: result.versionstamp }
+          : null,
+        isNull: result === null,
+        hasValue: result ? result.value !== null : false,
+      });
 
-      if (result.value !== null) {
+      if (result && result.value !== null && result.value !== undefined) {
         this.setCache(key, result.value as ConfigValue);
         return result.value as T;
       }
@@ -66,6 +75,7 @@ export class ConfigService {
       logger.error("Failed to get configuration value", {
         key,
         error: (error as Error).message,
+        kvAvailable: !!this.kv,
       });
       return null;
     }
@@ -77,23 +87,33 @@ export class ConfigService {
    */
   async set(key: string, value: ConfigValue): Promise<boolean> {
     try {
+      if (!this.kv) {
+        logger.error("KV store not available for configuration set", { key });
+        return false;
+      }
+
       const kvKey = ["config", key] as const;
       const result = await this.kv.set(kvKey, value);
 
-      if (result.ok) {
+      if (result && result.ok) {
         // Update cache
         this.setCache(key, value);
         logger.info("Configuration value updated", { key, value });
         return true;
       }
 
-      logger.error("Failed to set configuration value", { key, value });
+      logger.error("Failed to set configuration value", {
+        key,
+        value,
+        resultOk: result?.ok,
+      });
       return false;
     } catch (error) {
       logger.error("Error setting configuration value", {
         key,
         value,
         error: (error as Error).message,
+        kvAvailable: !!this.kv,
       });
       return false;
     }
@@ -276,17 +296,76 @@ export class ConfigService {
   private async initializeKvConfig(
     configData: Record<string, any>,
   ): Promise<void> {
-    const flatConfig = this.flattenObject(configData);
-
-    for (const [key, value] of Object.entries(flatConfig)) {
-      const kvKey = ["config", key] as const;
-
-      // Only set if key doesn't exist (don't override existing runtime config)
-      const existing = await this.kv.get(kvKey);
-      if (existing === null || existing.value === null) {
-        await this.kv.set(kvKey, value);
-        logger.debug("Initialized configuration key", { key, value });
+    try {
+      if (!this.kv) {
+        logger.error("KV store not available for configuration initialization");
+        throw new Error("KV store not available");
       }
+
+      const flatConfig = this.flattenObject(configData);
+      logger.debug("Initializing KV configuration", {
+        keyCount: Object.keys(flatConfig).length,
+        kvType: this.kv.constructor.name,
+        flatConfigKeys: Object.keys(flatConfig).slice(0, 5), // Show first 5 keys
+      });
+
+      for (const [key, value] of Object.entries(flatConfig)) {
+        const kvKey = ["config", key] as const;
+
+        try {
+          // Only set if key doesn't exist (don't override existing runtime config)
+          logger.debug("Getting KV key", { key, kvKey });
+          const existing = await this.kv.get(kvKey);
+          logger.debug("KV get result", {
+            key,
+            existing: existing
+              ? { value: existing.value, versionstamp: existing.versionstamp }
+              : null,
+            isNull: existing === null,
+            hasValue: existing ? existing.value !== null : false,
+          });
+
+          // Handle both null result and null value cases
+          const shouldSet =
+            !existing ||
+            existing.value === null ||
+            existing.value === undefined;
+
+          if (shouldSet) {
+            const result = await this.kv.set(kvKey, value);
+            if (result && result.ok) {
+              logger.debug("Initialized configuration key", { key, value });
+            } else {
+              logger.warn("Failed to set configuration key", {
+                key,
+                error: "KV set operation failed",
+                resultOk: result?.ok,
+              });
+            }
+          } else {
+            logger.debug("Configuration key already exists, skipping", {
+              key,
+              existingValue: existing.value,
+            });
+          }
+        } catch (error) {
+          logger.error("Error processing configuration key", {
+            key,
+            error: (error as Error).message,
+            stack: (error as Error).stack?.split("\n").slice(0, 3).join("\n"),
+          });
+          // Continue with other keys even if one fails
+        }
+      }
+
+      logger.debug("KV configuration initialization completed");
+    } catch (error) {
+      logger.error("Failed to initialize KV configuration", {
+        error: (error as Error).message,
+        stack: (error as Error).stack?.split("\n").slice(0, 3).join("\n"),
+        kvAvailable: !!this.kv,
+      });
+      throw error;
     }
   }
 
@@ -410,8 +489,15 @@ export class ConfigService {
   }
 
   private setCache(key: string, value: ConfigValue): void {
-    this.cache.set(key, value);
-    this.cacheExpiry.set(key, Date.now() + this.CACHE_TTL_MS);
+    try {
+      this.cache.set(key, value);
+      this.cacheExpiry.set(key, Date.now() + this.CACHE_TTL_MS);
+    } catch (error) {
+      logger.warn("Error setting cache", {
+        key,
+        error: (error as Error).message,
+      });
+    }
   }
 }
 
