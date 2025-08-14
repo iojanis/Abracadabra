@@ -2,7 +2,7 @@
 // Handles session validation, authentication state, and user context
 
 import type { Context, Next } from "hono";
-import type { UserObject, SessionObject } from "../types/index.ts";
+import type { SessionObject, UserObject } from "../types/index.ts";
 import { getLogger } from "../services/logging.ts";
 import { getCookie } from "hono/cookie";
 

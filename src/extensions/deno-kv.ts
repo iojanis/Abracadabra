@@ -3,10 +3,10 @@
 
 import type {
   Extension,
-  onLoadDocumentPayload,
-  onStoreDocumentPayload,
   onChangePayload,
   onDestroyPayload,
+  onLoadDocumentPayload,
+  onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import * as Y from "yjs";
 import { getLogger } from "../services/logging.ts";

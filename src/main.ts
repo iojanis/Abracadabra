@@ -6,7 +6,7 @@ import { cors } from "hono/cors";
 import { upgradeWebSocket } from "hono/deno";
 import { Hocuspocus } from "@hocuspocus/server";
 
-import { createConfigService, type ConfigService } from "./services/config.ts";
+import { type ConfigService, createConfigService } from "./services/config.ts";
 import { createLoggingService, getLogger } from "./services/logging.ts";
 import { ensureNodeJSMethods } from "./extensions/websocket-polyfill.ts";
 import type { ServerConfig } from "./types/index.ts";
@@ -46,11 +46,11 @@ import { DocsRoutes } from "./routes/docs.ts";
 
 // Import authentication middleware
 import {
-  requireAuth,
-  optionalAuth,
-  requireAdmin,
-  rateLimit,
   apiCors,
+  optionalAuth,
+  rateLimit,
+  requireAdmin,
+  requireAuth,
 } from "./middleware/auth.ts";
 
 // Import Hocuspocus extension
@@ -112,7 +112,7 @@ class AbracadabraServer {
         error: (error as Error).message,
       });
       await this.cleanup();
-      Deno.exit(1);
+      //Deno.exit(1);
     }
   }
 
@@ -561,7 +561,7 @@ class AbracadabraServer {
     const shutdown = async (signal: string) => {
       this.logger.info("Received shutdown signal", { signal });
       await this.cleanup();
-      Deno.exit(0);
+      //Deno.exit(0);
     };
 
     // Handle process signals
@@ -652,7 +652,7 @@ async function bootstrap(): Promise<void> {
     mainLogger.error("Failed to bootstrap server", {
       error: (error as Error).message,
     });
-    Deno.exit(1);
+    //Deno.exit(1);
   }
 }
 

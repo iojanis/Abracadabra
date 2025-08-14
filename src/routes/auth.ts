@@ -6,12 +6,12 @@ import { validator } from "hono/validator";
 import { z } from "zod";
 import { hash, verify } from "../utils/password.ts";
 import type {
+  ApiError,
+  ApiResponse,
   PermissionLevel,
+  SessionObject,
   UserObject,
   UserSettings,
-  SessionObject,
-  ApiResponse,
-  ApiError,
 } from "../types/index.ts";
 import { getLogger } from "../services/logging.ts";
 import { AuthService } from "../auth.ts";
@@ -35,25 +35,20 @@ function mergeUserSettings(
 
   if (!updates) {
     return {
-      defaultPermissions:
-        base.defaultPermissions || defaults.defaultPermissions!,
-      emailNotifications:
-        base.emailNotifications ?? defaults.emailNotifications!,
+      defaultPermissions: base.defaultPermissions || defaults.defaultPermissions!,
+      emailNotifications: base.emailNotifications ?? defaults.emailNotifications!,
       maxNestingDepth: base.maxNestingDepth || defaults.maxNestingDepth!,
     };
   }
 
   return {
-    defaultPermissions:
-      updates.defaultPermissions ||
+    defaultPermissions: updates.defaultPermissions ||
       base.defaultPermissions ||
       defaults.defaultPermissions!,
-    emailNotifications:
-      updates.emailNotifications ??
+    emailNotifications: updates.emailNotifications ??
       base.emailNotifications ??
       defaults.emailNotifications!,
-    maxNestingDepth:
-      updates.maxNestingDepth ||
+    maxNestingDepth: updates.maxNestingDepth ||
       base.maxNestingDepth ||
       defaults.maxNestingDepth!,
   };
@@ -311,8 +306,7 @@ export class AuthRoutes {
     // User logout
     this.app.post("/logout", async (c) => {
       try {
-        const sessionToken =
-          c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (sessionToken) {
@@ -346,8 +340,7 @@ export class AuthRoutes {
     // Get current user profile
     this.app.get("/profile", async (c) => {
       try {
-        const sessionToken =
-          c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -450,8 +443,7 @@ export class AuthRoutes {
       async (c) => {
         try {
           const data = c.req.valid("json");
-          const sessionToken =
-            c.req.header("authorization")?.replace("Bearer ", "") ||
+          const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
             c.req.header("x-session-token");
 
           if (!sessionToken) {
@@ -519,16 +511,16 @@ export class AuthRoutes {
               user.settings,
               data.settings
                 ? {
-                    ...(data.settings.defaultPermissions !== undefined && {
-                      defaultPermissions: data.settings.defaultPermissions,
-                    }),
-                    ...(data.settings.emailNotifications !== undefined && {
-                      emailNotifications: data.settings.emailNotifications,
-                    }),
-                    ...(data.settings.maxNestingDepth !== undefined && {
-                      maxNestingDepth: data.settings.maxNestingDepth,
-                    }),
-                  }
+                  ...(data.settings.defaultPermissions !== undefined && {
+                    defaultPermissions: data.settings.defaultPermissions,
+                  }),
+                  ...(data.settings.emailNotifications !== undefined && {
+                    emailNotifications: data.settings.emailNotifications,
+                  }),
+                  ...(data.settings.maxNestingDepth !== undefined && {
+                    maxNestingDepth: data.settings.maxNestingDepth,
+                  }),
+                }
                 : undefined,
             ),
             updatedAt: new Date(),
@@ -589,8 +581,7 @@ export class AuthRoutes {
       async (c) => {
         try {
           const data = c.req.valid("json");
-          const sessionToken =
-            c.req.header("authorization")?.replace("Bearer ", "") ||
+          const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
             c.req.header("x-session-token");
 
           if (!sessionToken) {
@@ -708,8 +699,7 @@ export class AuthRoutes {
     // List user sessions
     this.app.get("/sessions", async (c) => {
       try {
-        const sessionToken =
-          c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -792,8 +782,7 @@ export class AuthRoutes {
     this.app.delete("/sessions/:sessionId", async (c) => {
       try {
         const sessionId = c.req.param("sessionId");
-        const sessionToken =
-          c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -813,8 +802,7 @@ export class AuthRoutes {
           "sessions",
           sessionToken,
         ]);
-        const currentSession =
-          currentSessionResult.value as SessionObject | null;
+        const currentSession = currentSessionResult.value as SessionObject | null;
 
         if (
           !currentSession ||

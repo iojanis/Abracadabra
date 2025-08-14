@@ -6,14 +6,14 @@ import { validator } from "hono/validator";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.ts";
 import type {
+  ApiError,
+  ApiResponse,
+  ConfigValue,
+  DocumentMetadataObject,
   ServerConfig,
+  SessionObject,
   UserObject,
   UserSettings,
-  SessionObject,
-  DocumentMetadataObject,
-  ApiResponse,
-  ApiError,
-  ConfigValue,
 } from "../types/index.ts";
 import type { ConfigService } from "../services/config.ts";
 import type { DocumentService } from "../services/documents.ts";
@@ -39,25 +39,20 @@ function mergeUserSettings(
 
   if (!updates) {
     return {
-      defaultPermissions:
-        base.defaultPermissions || defaults.defaultPermissions!,
-      emailNotifications:
-        base.emailNotifications ?? defaults.emailNotifications!,
+      defaultPermissions: base.defaultPermissions || defaults.defaultPermissions!,
+      emailNotifications: base.emailNotifications ?? defaults.emailNotifications!,
       maxNestingDepth: base.maxNestingDepth || defaults.maxNestingDepth!,
     };
   }
 
   return {
-    defaultPermissions:
-      updates.defaultPermissions ||
+    defaultPermissions: updates.defaultPermissions ||
       base.defaultPermissions ||
       defaults.defaultPermissions!,
-    emailNotifications:
-      updates.emailNotifications ??
+    emailNotifications: updates.emailNotifications ??
       base.emailNotifications ??
       defaults.emailNotifications!,
-    maxNestingDepth:
-      updates.maxNestingDepth ||
+    maxNestingDepth: updates.maxNestingDepth ||
       base.maxNestingDepth ||
       defaults.maxNestingDepth!,
   };
@@ -422,8 +417,7 @@ export class AdminRoutes {
 
           if (search) {
             const searchLower = search.toLowerCase();
-            const matchesSearch =
-              user.username.toLowerCase().includes(searchLower) ||
+            const matchesSearch = user.username.toLowerCase().includes(searchLower) ||
               user.displayName.toLowerCase().includes(searchLower) ||
               (user.email && user.email.toLowerCase().includes(searchLower));
 
@@ -570,16 +564,16 @@ export class AdminRoutes {
               user.settings,
               data.settings
                 ? {
-                    ...(data.settings.defaultPermissions !== undefined && {
-                      defaultPermissions: data.settings.defaultPermissions,
-                    }),
-                    ...(data.settings.emailNotifications !== undefined && {
-                      emailNotifications: data.settings.emailNotifications,
-                    }),
-                    ...(data.settings.maxNestingDepth !== undefined && {
-                      maxNestingDepth: data.settings.maxNestingDepth,
-                    }),
-                  }
+                  ...(data.settings.defaultPermissions !== undefined && {
+                    defaultPermissions: data.settings.defaultPermissions,
+                  }),
+                  ...(data.settings.emailNotifications !== undefined && {
+                    emailNotifications: data.settings.emailNotifications,
+                  }),
+                  ...(data.settings.maxNestingDepth !== undefined && {
+                    maxNestingDepth: data.settings.maxNestingDepth,
+                  }),
+                }
                 : undefined,
             ),
             updatedAt: new Date(),
@@ -838,8 +832,7 @@ export class AdminRoutes {
               const sessionCleanup = await this.cleanupExpiredSessions();
 
               // Clean up documents
-              const documentCleanup =
-                await this.documentService.cleanupDocuments();
+              const documentCleanup = await this.documentService.cleanupDocuments();
 
               result = {
                 sessionsRemoved: sessionCleanup,

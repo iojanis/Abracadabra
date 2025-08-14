@@ -95,7 +95,7 @@ export async function verify(
       return false;
     }
 
-    const iterations = parseInt(parts[0], 10);
+    const _iterations = parseInt(parts[0], 10);
     const salt = base64ToArrayBuffer(parts[1]);
     const storedHash = base64ToArrayBuffer(parts[2]);
 
@@ -114,7 +114,7 @@ export async function verify(
     }
 
     return result === 0;
-  } catch (error) {
+  } catch (_error) {
     // If there's any error in parsing or verification, return false
     return false;
   }

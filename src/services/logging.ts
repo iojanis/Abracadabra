@@ -5,8 +5,8 @@ import {
   configure,
   getConsoleSink,
   getLogger as getLogtapeLogger,
-  parseLogLevel,
   type Logger,
+  parseLogLevel,
 } from "logtape";
 
 import type { ConfigService } from "./config.ts";
@@ -46,13 +46,11 @@ export class LoggingService {
       let logLevel: AbracadabraLogLevel = "INFO";
 
       if (configService) {
-        logLevel =
-          (await configService.get<AbracadabraLogLevel>("logging.log_level")) ??
+        logLevel = (await configService.get<AbracadabraLogLevel>("logging.log_level")) ??
           "INFO";
       } else {
         // Fallback to environment variable
-        logLevel =
-          (Deno.env.get("ABRACADABRA_LOG_LEVEL") as AbracadabraLogLevel) ??
+        logLevel = (Deno.env.get("ABRACADABRA_LOG_LEVEL") as AbracadabraLogLevel) ??
           "INFO";
       }
 
@@ -278,10 +276,9 @@ export class LoggingService {
               const message = record.message;
 
               // Format extra properties
-              const extras =
-                Object.keys(record.properties).length > 0
-                  ? `\n  ${JSON.stringify(record.properties, null, 2)}`
-                  : "";
+              const extras = Object.keys(record.properties).length > 0
+                ? `\n  ${JSON.stringify(record.properties, null, 2)}`
+                : "";
 
               // Color coding for different levels
               const colors = {
@@ -292,8 +289,7 @@ export class LoggingService {
               };
 
               const reset = "\x1b[0m";
-              const color =
-                colors[record.level.toString() as keyof typeof colors] || "";
+              const color = colors[record.level.toString() as keyof typeof colors] || "";
 
               return `${color}[${timestamp}] ${level} ${category}: ${message}${reset}${extras}`;
             },
@@ -407,8 +403,7 @@ export function extractRequestContext(request: Request): LogContext {
   const context: LogContext = {
     method: request.method,
     path: url.pathname,
-    ip:
-      request.headers.get("X-Forwarded-For") ||
+    ip: request.headers.get("X-Forwarded-For") ||
       request.headers.get("X-Real-IP") ||
       "unknown",
   };

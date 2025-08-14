@@ -399,8 +399,7 @@ export class UploadRoutes {
           );
         }
 
-        const documentPath =
-          c.req.path.replace("/api/uploads/document", "") || "/";
+        const documentPath = c.req.path.replace("/api/uploads/document", "") || "/";
 
         const uploadsService = getUploadsService();
         const files = await uploadsService.listDocumentFiles(

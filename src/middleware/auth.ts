@@ -188,8 +188,7 @@ export function requireAdmin() {
 
       // For now, we'll check if user has admin-level default permissions
       // In a real system, you'd have a more sophisticated role system
-      const isAdmin =
-        sessionContext.user?.settings?.defaultPermissions === "ADMIN" ||
+      const isAdmin = sessionContext.user?.settings?.defaultPermissions === "ADMIN" ||
         sessionContext.user?.settings?.defaultPermissions === "OWNER";
 
       if (!isAdmin) {
@@ -271,8 +270,7 @@ export function requireSelfOrAdmin(
       const targetUserId = getUserIdFromPath(c.req.path);
 
       // Check if user is admin
-      const isAdmin =
-        sessionContext.user?.settings?.defaultPermissions === "ADMIN" ||
+      const isAdmin = sessionContext.user?.settings?.defaultPermissions === "ADMIN" ||
         sessionContext.user?.settings?.defaultPermissions === "OWNER";
 
       // Allow if admin or accessing own resources

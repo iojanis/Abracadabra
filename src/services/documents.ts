@@ -135,7 +135,8 @@ export class DocumentService {
         if (!/^[a-zA-Z0-9_-]{1,100}$/.test(component)) {
           return {
             valid: false,
-            error: `Path component "${component}" must be 1-100 characters and contain only letters, numbers, underscores, and hyphens`,
+            error:
+              `Path component "${component}" must be 1-100 characters and contain only letters, numbers, underscores, and hyphens`,
           };
         }
       }
@@ -368,17 +369,12 @@ export class DocumentService {
     getDocumentLogger().debug("Retrieving document", { path: normalizedPath });
 
     // Get all document data in parallel
-    const [metadataResult, permissionsResult, yjsStateResult, childrenResult] =
-      await Promise.all([
-        this.kv.get(["documents", "metadata", normalizedPath]),
-        options.includePermissions
-          ? this.kv.get(["documents", "permissions", normalizedPath])
-          : null,
-        this.kv.get(["documents", "yjs_state", normalizedPath]),
-        options.includeChildren
-          ? this.kv.get(["documents", "children", normalizedPath])
-          : null,
-      ]);
+    const [metadataResult, permissionsResult, yjsStateResult, childrenResult] = await Promise.all([
+      this.kv.get(["documents", "metadata", normalizedPath]),
+      options.includePermissions ? this.kv.get(["documents", "permissions", normalizedPath]) : null,
+      this.kv.get(["documents", "yjs_state", normalizedPath]),
+      options.includeChildren ? this.kv.get(["documents", "children", normalizedPath]) : null,
+    ]);
 
     const metadata = metadataResult.value as DocumentMetadataObject | null;
     if (!metadata) return null;
@@ -725,8 +721,7 @@ export class DocumentService {
       if (options.onlyPublic && !metadata.is_public) continue;
 
       // Simple text matching
-      const searchText =
-        `${metadata.title || ""} ${metadata.description || ""}`.toLowerCase();
+      const searchText = `${metadata.title || ""} ${metadata.description || ""}`.toLowerCase();
       if (searchText.includes(query.toLowerCase())) {
         results.push(metadata);
       }

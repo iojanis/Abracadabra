@@ -6,16 +6,16 @@ import { validator } from "hono/validator";
 import { z } from "zod";
 
 import type {
-  DocumentMetadataObject,
-  DocumentDetails,
-  DocumentPermissions,
-  PermissionLevel,
-  ApiResponse,
   ApiError,
+  ApiResponse,
   DocumentCreateOptions,
-  DocumentUpdateOptions,
+  DocumentDetails,
   DocumentListOptions,
+  DocumentMetadataObject,
+  DocumentPermissions,
   DocumentSearchOptions,
+  DocumentUpdateOptions,
+  PermissionLevel,
 } from "../types/index.ts";
 import type { DocumentService } from "../services/documents.ts";
 import type { PermissionService } from "../services/permissions.ts";
@@ -217,8 +217,7 @@ export class DocumentRoutes {
           }
 
           const data = c.req.valid("json");
-          const path =
-            c.req.path.replace("/api/documents", "") || `/${username}/untitled`;
+          const path = c.req.path.replace("/api/documents", "") || `/${username}/untitled`;
 
           // Ensure path starts with username
           const normalizedPath = path.startsWith(`/${username}`)
@@ -244,8 +243,7 @@ export class DocumentRoutes {
                 {
                   error: {
                     code: "PERMISSION_DENIED",
-                    message:
-                      "Insufficient permissions to create document in this location",
+                    message: "Insufficient permissions to create document in this location",
                     timestamp: new Date().toISOString(),
                   },
                 },
@@ -355,8 +353,7 @@ export class DocumentRoutes {
           }
         } else {
           // Check if document is public
-          const permissions =
-            await this.permissionService.getDocumentPermissions(path);
+          const permissions = await this.permissionService.getDocumentPermissions(path);
           if (!permissions || permissions.publicAccess === "NONE") {
             return c.json(
               {
@@ -810,8 +807,7 @@ export class DocumentRoutes {
             {
               error: {
                 code: "PERMISSION_DENIED",
-                message:
-                  "Insufficient permissions to view document permissions",
+                message: "Insufficient permissions to view document permissions",
                 timestamp: new Date().toISOString(),
               },
             },
@@ -819,8 +815,7 @@ export class DocumentRoutes {
           );
         }
 
-        const permissions =
-          await this.permissionService.getDocumentPermissions(path);
+        const permissions = await this.permissionService.getDocumentPermissions(path);
 
         if (!permissions) {
           return c.json(
@@ -934,8 +929,7 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message:
-                    "Insufficient permissions to modify document permissions",
+                  message: "Insufficient permissions to modify document permissions",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1035,8 +1029,7 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message:
-                    "Insufficient permissions to grant document permission",
+                  message: "Insufficient permissions to grant document permission",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1126,8 +1119,7 @@ export class DocumentRoutes {
             {
               error: {
                 code: "PERMISSION_DENIED",
-                message:
-                  "Insufficient permissions to revoke document permission",
+                message: "Insufficient permissions to revoke document permission",
                 timestamp: new Date().toISOString(),
               },
             },
@@ -1190,8 +1182,7 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message:
-                    "Insufficient permissions to view document statistics",
+                  message: "Insufficient permissions to view document statistics",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1200,15 +1191,13 @@ export class DocumentRoutes {
           }
         } else {
           // Check if document is public
-          const permissions =
-            await this.permissionService.getDocumentPermissions(path);
+          const permissions = await this.permissionService.getDocumentPermissions(path);
           if (!permissions || permissions.publicAccess === "NONE") {
             return c.json(
               {
                 error: {
                   code: "AUTHENTICATION_REQUIRED",
-                  message:
-                    "Authentication required to access document statistics",
+                  message: "Authentication required to access document statistics",
                   timestamp: new Date().toISOString(),
                 },
               },

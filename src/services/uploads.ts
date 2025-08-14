@@ -217,8 +217,7 @@ export class UploadsService {
   async initialize(): Promise<void> {
     // Load upload configuration
     this.uploadConfig = {
-      maxFileSize:
-        (await this.config.get<number>("uploads.max_file_size")) ?? 10485760, // 10MB
+      maxFileSize: (await this.config.get<number>("uploads.max_file_size")) ?? 10485760, // 10MB
       allowedMimeTypes: (await this.config.get<string[]>(
         "uploads.allowed_mime_types",
       )) ?? [
@@ -248,18 +247,13 @@ export class UploadsService {
         ".docx",
         ".xlsx",
       ],
-      uploadPath:
-        (await this.config.get<string>("uploads.local_path")) ?? "./uploads",
+      uploadPath: (await this.config.get<string>("uploads.local_path")) ?? "./uploads",
       useS3: (await this.config.get<boolean>("uploads.use_s3")) ?? false,
-      s3Bucket:
-        (await this.config.get<string>("uploads.s3_bucket")) ?? undefined,
-      s3Region:
-        (await this.config.get<string>("uploads.s3_region")) ?? undefined,
-      s3AccessKeyId:
-        (await this.config.get<string>("uploads.s3_access_key_id")) ??
+      s3Bucket: (await this.config.get<string>("uploads.s3_bucket")) ?? undefined,
+      s3Region: (await this.config.get<string>("uploads.s3_region")) ?? undefined,
+      s3AccessKeyId: (await this.config.get<string>("uploads.s3_access_key_id")) ??
         undefined,
-      s3SecretAccessKey:
-        (await this.config.get<string>("uploads.s3_secret_access_key")) ??
+      s3SecretAccessKey: (await this.config.get<string>("uploads.s3_secret_access_key")) ??
         undefined,
     };
 
@@ -409,10 +403,12 @@ export class UploadsService {
   async downloadFile(
     fileId: string,
     userId: string,
-  ): Promise<{
-    data: Uint8Array;
-    metadata: FileMetadataObject;
-  } | null> {
+  ): Promise<
+    {
+      data: Uint8Array;
+      metadata: FileMetadataObject;
+    } | null
+  > {
     const metadata = await this.getFile(fileId);
     if (!metadata) return null;
 
@@ -593,9 +589,7 @@ export class UploadsService {
     let totalSize = 0;
     const filesByType: Record<string, number> = {};
 
-    const prefix = userId
-      ? ["uploads", "by_user", userId]
-      : ["uploads", "files"];
+    const prefix = userId ? ["uploads", "by_user", userId] : ["uploads", "files"];
     const iter = this.kv.list({ prefix });
 
     for await (const { value } of iter) {
@@ -606,16 +600,14 @@ export class UploadsService {
         if (metadata) {
           totalFiles++;
           totalSize += metadata.size;
-          filesByType[metadata.mimeType] =
-            (filesByType[metadata.mimeType] || 0) + 1;
+          filesByType[metadata.mimeType] = (filesByType[metadata.mimeType] || 0) + 1;
         }
       } else {
         // For global stats, value is metadata
         const metadata = value as FileMetadataObject;
         totalFiles++;
         totalSize += metadata.size;
-        filesByType[metadata.mimeType] =
-          (filesByType[metadata.mimeType] || 0) + 1;
+        filesByType[metadata.mimeType] = (filesByType[metadata.mimeType] || 0) + 1;
       }
     }
 

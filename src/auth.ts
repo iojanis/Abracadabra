@@ -1,17 +1,17 @@
 // Authentication Service for Abracadabra Server
 // Handles user registration, login, session management using Lucia Auth v3
 
-import { hash, verify, validatePasswordStrength } from "./utils/password.ts";
+import { hash, validatePasswordStrength, verify } from "./utils/password.ts";
 import { ERROR_CODES } from "./types/index.ts";
 import type {
-  UserObject,
-  UserSettings,
-  SessionObject,
+  EmailIndexKey,
   PermissionLevel,
+  SessionKey,
+  SessionObject,
   UserKey,
   UsernameIndexKey,
-  EmailIndexKey,
-  SessionKey,
+  UserObject,
+  UserSettings,
 } from "./types/index.ts";
 import { getLogger } from "./services/logging.ts";
 import type { ConfigService } from "./services/config.ts";
@@ -116,8 +116,7 @@ export class AuthService {
       const defaultSettings: UserSettings = {
         defaultPermissions: "VIEWER",
         emailNotifications: true,
-        maxNestingDepth:
-          (await this.config.get<number>("documents.max_nesting_depth")) ?? 10,
+        maxNestingDepth: (await this.config.get<number>("documents.max_nesting_depth")) ?? 10,
       };
 
       const user: UserObject = {
@@ -473,8 +472,7 @@ export class AuthService {
 
   private async createSession(userId: string): Promise<AuthResult> {
     try {
-      const sessionTimeout =
-        (await this.config.get<number>("authentication.session_timeout")) ??
+      const sessionTimeout = (await this.config.get<number>("authentication.session_timeout")) ??
         2592000; // 30 days
 
       const now = new Date();
@@ -614,8 +612,7 @@ export class AuthService {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.username)) {
       return {
         valid: false,
-        error:
-          "Username can only contain letters, numbers, hyphens, and underscores",
+        error: "Username can only contain letters, numbers, hyphens, and underscores",
       };
     }
 

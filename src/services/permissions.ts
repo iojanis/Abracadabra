@@ -3,12 +3,12 @@
 
 import { createMongoAbility, type MongoAbility } from "@casl/ability";
 import type {
+  DocumentMetadataObject,
+  DocumentPermissions,
   PermissionLevel,
   PermissionObject,
-  DocumentPermissions,
-  DocumentMetadataObject,
-  UserObject,
   ServerConfig,
+  UserObject,
 } from "../types/index.ts";
 import type { ConfigService } from "./config.ts";
 import { getLogger } from "./logging.ts";
@@ -113,7 +113,7 @@ export class PermissionService {
   ): boolean {
     return (
       this.getPermissionValue(userLevel) >=
-      this.getPermissionValue(requiredLevel)
+        this.getPermissionValue(requiredLevel)
     );
   }
 
@@ -124,9 +124,7 @@ export class PermissionService {
     level1: PermissionLevel,
     level2: PermissionLevel,
   ): PermissionLevel {
-    return this.getPermissionValue(level1) >= this.getPermissionValue(level2)
-      ? level1
-      : level2;
+    return this.getPermissionValue(level1) >= this.getPermissionValue(level2) ? level1 : level2;
   }
 
   // ============================================================================
@@ -277,8 +275,7 @@ export class PermissionService {
       "permissions",
       parentPath,
     ]);
-    const parentPermissions =
-      parentPermissionsResult.value as DocumentPermissions | null;
+    const parentPermissions = parentPermissionsResult.value as DocumentPermissions | null;
 
     if (!parentPermissions?.inherit_from_parent) {
       return {
@@ -547,8 +544,7 @@ export class PermissionService {
       "permissions",
       normalizedPath,
     ]);
-    const current =
-      (currentResult.value as DocumentPermissions) ||
+    const current = (currentResult.value as DocumentPermissions) ||
       this.getDefaultPermissions(actorId);
 
     // Merge permissions
@@ -598,8 +594,7 @@ export class PermissionService {
       "permissions",
       normalizedPath,
     ]);
-    const current =
-      (currentResult.value as DocumentPermissions) ||
+    const current = (currentResult.value as DocumentPermissions) ||
       this.getDefaultPermissions(actorId);
 
     // Remove from other lists first
@@ -622,7 +617,7 @@ export class PermissionService {
       case "OWNER":
         current.owner = userId;
         break;
-      // ADMIN and NONE are handled differently
+        // ADMIN and NONE are handled differently
     }
 
     await this.kv.set(["documents", "permissions", normalizedPath], current);
@@ -695,9 +690,9 @@ export class PermissionService {
    */
   private normalizePath(path: string): string {
     return path
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/\/+/g, "/")
-      .startsWith("/")
+        .replace(/^\/+|\/+$/g, "")
+        .replace(/\/+/g, "/")
+        .startsWith("/")
       ? path
       : `/${path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")}`;
   }

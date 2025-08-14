@@ -390,8 +390,7 @@ export class ScriptRunner {
     context: ScriptContext,
   ): Promise<Response> {
     // Security restrictions
-    const allowedDomains =
-      (await this.config.get<string[]>("scripts.allowed_domains")) || [];
+    const allowedDomains = (await this.config.get<string[]>("scripts.allowed_domains")) || [];
 
     const urlObj = new URL(url);
     if (!allowedDomains.includes(urlObj.hostname)) {

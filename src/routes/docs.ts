@@ -251,8 +251,7 @@ export class DocsRoutes {
             name: spec.info.title,
             description: spec.info.description,
             version: spec.info.version,
-            schema:
-              "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+            schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
           },
           item: this.convertOpenAPIToPostman(spec),
           variable: [
