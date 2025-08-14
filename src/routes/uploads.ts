@@ -7,6 +7,41 @@ import { z } from "zod";
 import { getUploadsService } from "../services/uploads.ts";
 import type { FileMetadataObject } from "../types/index.ts";
 
+/**
+ * Detect if running on Deno Deploy
+ */
+function isDenoDeploy(): boolean {
+  return !!(
+    Deno.env.get("DENO_DEPLOYMENT_ID") ||
+    Deno.env.get("DENO_REGION") ||
+    globalThis.location?.hostname?.includes("deno.dev")
+  );
+}
+
+/**
+ * Check if uploads are supported in the current environment
+ */
+function areUploadsSupported(): { supported: boolean; reason?: string } {
+  const isDeployEnv = isDenoDeploy();
+
+  if (isDeployEnv) {
+    // On Deno Deploy, uploads are only supported with S3
+    const hasS3Config = !!(
+      Deno.env.get("S3_BUCKET") || Deno.env.get("AWS_S3_BUCKET")
+    );
+
+    if (!hasS3Config) {
+      return {
+        supported: false,
+        reason:
+          "File uploads are not supported on Deno Deploy without S3 configuration. Please configure S3 storage to enable uploads.",
+      };
+    }
+  }
+
+  return { supported: true };
+}
+
 // Validation schemas
 const UploadSchema = z.object({
   filename: z.string().min(1).max(255),
@@ -38,6 +73,22 @@ export class UploadRoutes {
     // Upload a file
     this.app.post("/", zValidator("form", UploadSchema), async (c) => {
       try {
+        // Check if uploads are supported in this environment
+        const uploadCheck = areUploadsSupported();
+        if (!uploadCheck.supported) {
+          return c.json(
+            {
+              error: {
+                code: "UPLOADS_NOT_SUPPORTED",
+                message:
+                  uploadCheck.reason ||
+                  "File uploads are not supported in this environment",
+              },
+            },
+            503,
+          );
+        }
+
         const session = (c as any).get("session");
         const userId = session?.userId;
 
@@ -399,7 +450,8 @@ export class UploadRoutes {
           );
         }
 
-        const documentPath = c.req.path.replace("/api/uploads/document", "") || "/";
+        const documentPath =
+          c.req.path.replace("/api/uploads/document", "") || "/";
 
         const uploadsService = getUploadsService();
         const files = await uploadsService.listDocumentFiles(
@@ -440,7 +492,8 @@ export class UploadRoutes {
     });
 
     // Get upload statistics
-    this.app.get("/stats", async (c) => {
+    // Get user files
+    this.app.get("/user", async (c) => {
       try {
         const session = (c as any).get("session");
         const userId = session?.userId;
@@ -458,18 +511,48 @@ export class UploadRoutes {
         }
 
         const uploadsService = getUploadsService();
-        const stats = await uploadsService.getUploadStats(userId);
+        const files = await uploadsService.listUserFiles(userId);
 
         return c.json({
-          success: true,
-          data: stats,
+          files,
         });
       } catch (error) {
+        console.error("Error listing user files:", error);
         return c.json(
           {
             error: {
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Failed to get upload statistics",
+              code: "INTERNAL_ERROR",
+              message: "Failed to list files",
+            },
+          },
+          500,
+        );
+      }
+    });
+
+    // Get upload status and capability
+    this.app.get("/status", async (c) => {
+      try {
+        const uploadCheck = areUploadsSupported();
+        const isDeployEnv = isDenoDeploy();
+
+        return c.json({
+          supported: uploadCheck.supported,
+          reason: uploadCheck.reason,
+          environment: {
+            isDenoDeploy: isDeployEnv,
+            hasS3Config: !!(
+              Deno.env.get("S3_BUCKET") || Deno.env.get("AWS_S3_BUCKET")
+            ),
+          },
+        });
+      } catch (error) {
+        console.error("Error checking upload status:", error);
+        return c.json(
+          {
+            error: {
+              code: "INTERNAL_ERROR",
+              message: "Failed to check upload status",
             },
           },
           500,

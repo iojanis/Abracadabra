@@ -4,6 +4,17 @@
 import { getLogger } from "./logging.ts";
 import type { ConfigService } from "./config.ts";
 import type { PermissionService } from "./permissions.ts";
+
+/**
+ * Detect if running on Deno Deploy
+ */
+function isDenoDeploy(): boolean {
+  return !!(
+    Deno.env.get("DENO_DEPLOYMENT_ID") ||
+    Deno.env.get("DENO_REGION") ||
+    globalThis.location?.hostname?.includes("deno.dev")
+  );
+}
 import type { FileMetadataObject } from "../types/index.ts";
 
 let logger: ReturnType<typeof getLogger> | null = null;
@@ -60,13 +71,51 @@ export interface StorageProvider {
   getUrl(fileId: string): Promise<string>;
 }
 
+// No-op storage provider for environments where file uploads are not supported
+export class NoOpStorageProvider implements StorageProvider {
+  async store(
+    fileId: string,
+    data: Uint8Array,
+    mimeType: string,
+  ): Promise<void> {
+    throw new Error(
+      "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
+    );
+  }
+
+  async retrieve(fileId: string): Promise<Uint8Array> {
+    throw new Error(
+      "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
+    );
+  }
+
+  async delete(fileId: string): Promise<void> {
+    throw new Error(
+      "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
+    );
+  }
+
+  async getUrl(fileId: string): Promise<string> {
+    throw new Error(
+      "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
+    );
+  }
+}
+
 // Local storage provider
 export class LocalStorageProvider implements StorageProvider {
   private uploadPath: string;
 
   constructor(uploadPath: string) {
     this.uploadPath = uploadPath;
-    // Ensure upload directory exists
+    // Ensure upload directory exists (only if not on Deno Deploy)
+    const isDeployEnv = isDenoDeploy();
+    if (isDeployEnv) {
+      throw new Error(
+        "Local storage is not supported on Deno Deploy. Use S3 storage instead.",
+      );
+    }
+
     try {
       Deno.mkdirSync(this.uploadPath, { recursive: true });
     } catch (error) {
@@ -217,7 +266,8 @@ export class UploadsService {
   async initialize(): Promise<void> {
     // Load upload configuration
     this.uploadConfig = {
-      maxFileSize: (await this.config.get<number>("uploads.max_file_size")) ?? 10485760, // 10MB
+      maxFileSize:
+        (await this.config.get<number>("uploads.max_file_size")) ?? 10485760, // 10MB
       allowedMimeTypes: (await this.config.get<string[]>(
         "uploads.allowed_mime_types",
       )) ?? [
@@ -247,17 +297,24 @@ export class UploadsService {
         ".docx",
         ".xlsx",
       ],
-      uploadPath: (await this.config.get<string>("uploads.local_path")) ?? "./uploads",
+      uploadPath:
+        (await this.config.get<string>("uploads.local_path")) ?? "./uploads",
       useS3: (await this.config.get<boolean>("uploads.use_s3")) ?? false,
-      s3Bucket: (await this.config.get<string>("uploads.s3_bucket")) ?? undefined,
-      s3Region: (await this.config.get<string>("uploads.s3_region")) ?? undefined,
-      s3AccessKeyId: (await this.config.get<string>("uploads.s3_access_key_id")) ??
+      s3Bucket:
+        (await this.config.get<string>("uploads.s3_bucket")) ?? undefined,
+      s3Region:
+        (await this.config.get<string>("uploads.s3_region")) ?? undefined,
+      s3AccessKeyId:
+        (await this.config.get<string>("uploads.s3_access_key_id")) ??
         undefined,
-      s3SecretAccessKey: (await this.config.get<string>("uploads.s3_secret_access_key")) ??
+      s3SecretAccessKey:
+        (await this.config.get<string>("uploads.s3_secret_access_key")) ??
         undefined,
     };
 
-    // Initialize storage provider
+    // Initialize storage provider with Deno Deploy compatibility
+    const isDeployEnv = isDenoDeploy();
+
     if (this.uploadConfig.useS3 && this.uploadConfig.s3Bucket) {
       this.storageProvider = new S3StorageProvider(
         this.uploadConfig.s3Bucket,
@@ -268,13 +325,26 @@ export class UploadsService {
       getUploadLogger().info("S3 storage provider initialized", {
         bucket: this.uploadConfig.s3Bucket,
         region: this.uploadConfig.s3Region,
+        isDeployEnv,
       });
+    } else if (isDeployEnv) {
+      // On Deno Deploy without S3, use no-op provider
+      this.storageProvider = new NoOpStorageProvider();
+      getUploadLogger().warn(
+        "Uploads disabled on Deno Deploy - no S3 configuration found",
+        {
+          isDeployEnv,
+          recommendation: "Configure S3 storage to enable file uploads",
+        },
+      );
     } else {
+      // Local development - use local storage
       this.storageProvider = new LocalStorageProvider(
         this.uploadConfig.uploadPath,
       );
       getUploadLogger().info("Local storage provider initialized", {
         uploadPath: this.uploadConfig.uploadPath,
+        isDeployEnv,
       });
     }
   }
@@ -284,11 +354,26 @@ export class UploadsService {
    */
   async uploadFile(options: UploadOptions): Promise<UploadResult> {
     try {
+      // Check if uploads are supported
+      if (this.storageProvider instanceof NoOpStorageProvider) {
+        getUploadLogger().warn("Upload attempted but not supported", {
+          userId: options.userId,
+          filename: options.filename,
+          isDeployEnv: isDenoDeploy(),
+        });
+        return {
+          success: false,
+          error:
+            "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
+        };
+      }
+
       getUploadLogger().info("Processing file upload", {
         userId: options.userId,
         filename: options.filename,
         mimeType: options.mimeType,
         size: options.size,
+        isDeployEnv: isDenoDeploy(),
       });
 
       // Validate file
@@ -403,12 +488,10 @@ export class UploadsService {
   async downloadFile(
     fileId: string,
     userId: string,
-  ): Promise<
-    {
-      data: Uint8Array;
-      metadata: FileMetadataObject;
-    } | null
-  > {
+  ): Promise<{
+    data: Uint8Array;
+    metadata: FileMetadataObject;
+  } | null> {
     const metadata = await this.getFile(fileId);
     if (!metadata) return null;
 
@@ -589,7 +672,9 @@ export class UploadsService {
     let totalSize = 0;
     const filesByType: Record<string, number> = {};
 
-    const prefix = userId ? ["uploads", "by_user", userId] : ["uploads", "files"];
+    const prefix = userId
+      ? ["uploads", "by_user", userId]
+      : ["uploads", "files"];
     const iter = this.kv.list({ prefix });
 
     for await (const { value } of iter) {
@@ -600,14 +685,16 @@ export class UploadsService {
         if (metadata) {
           totalFiles++;
           totalSize += metadata.size;
-          filesByType[metadata.mimeType] = (filesByType[metadata.mimeType] || 0) + 1;
+          filesByType[metadata.mimeType] =
+            (filesByType[metadata.mimeType] || 0) + 1;
         }
       } else {
         // For global stats, value is metadata
         const metadata = value as FileMetadataObject;
         totalFiles++;
         totalSize += metadata.size;
-        filesByType[metadata.mimeType] = (filesByType[metadata.mimeType] || 0) + 1;
+        filesByType[metadata.mimeType] =
+          (filesByType[metadata.mimeType] || 0) + 1;
       }
     }
 
@@ -761,8 +848,60 @@ export async function createUploadsService(
     return uploadsService;
   }
 
+  const isDeployEnv = isDenoDeploy();
+
+  // Pre-check configuration for Deno Deploy compatibility
+  if (isDeployEnv) {
+    const useS3 = (await config.get<boolean>("uploads.use_s3")) ?? false;
+    const s3Bucket = await config.get<string>("uploads.s3_bucket");
+
+    if (!useS3 || !s3Bucket) {
+      getUploadLogger().warn(
+        "Uploads service starting in limited mode on Deno Deploy",
+        {
+          reason: "No S3 configuration found",
+          impact: "File uploads will be disabled",
+          solution: "Configure S3 storage to enable uploads",
+          isDeployEnv: true,
+        },
+      );
+    } else {
+      getUploadLogger().info(
+        "Uploads service configured for Deno Deploy with S3",
+        {
+          bucket: s3Bucket,
+          isDeployEnv: true,
+        },
+      );
+    }
+  }
+
   uploadsService = new UploadsService(kv, config, permissionService);
-  await uploadsService.initialize();
-  getUploadLogger().info("Uploads service initialized");
+
+  try {
+    await uploadsService.initialize();
+    getUploadLogger().info("Uploads service initialized successfully", {
+      isDeployEnv,
+      storageType: isDeployEnv ? "S3 or disabled" : "Local or S3",
+    });
+  } catch (error) {
+    if (
+      isDeployEnv &&
+      error instanceof Error &&
+      error.message.includes("Local storage is not supported")
+    ) {
+      getUploadLogger().warn(
+        "Uploads service initialized with limited functionality",
+        {
+          reason: "Local storage not supported on Deno Deploy",
+          isDeployEnv: true,
+        },
+      );
+      // Don't throw - the service will use NoOpStorageProvider
+    } else {
+      throw error;
+    }
+  }
+
   return uploadsService;
 }
