@@ -3,17 +3,22 @@
 import postgres from "postgres";
 
 // Define Deno KV types locally to avoid external dependencies
+// Note: We exclude 'symbol' from KvKeyPart as PostgreSQL can't store symbols
 export type KvKeyPart = string | number | bigint | boolean | Uint8Array;
 export type KvKey = readonly KvKeyPart[];
 
+// For compatibility with Deno.Kv types
+export type DenoKvKeyPart = KvKeyPart | symbol;
+export type DenoKvKey = readonly DenoKvKeyPart[];
+
 export interface KvEntry<T> {
-  key: KvKey;
+  key: DenoKvKey;
   value: T;
   versionstamp: string;
 }
 
 export interface KvEntryMaybe<T> {
-  key: KvKey;
+  key: DenoKvKey;
   value: T | null;
   versionstamp: string | null;
 }
@@ -21,9 +26,9 @@ export interface KvEntryMaybe<T> {
 export type KvConsistencyLevel = "strong" | "eventual";
 
 export interface KvListSelector {
-  prefix?: KvKey;
-  start?: KvKey;
-  end?: KvKey;
+  prefix?: DenoKvKey;
+  start?: DenoKvKey;
+  end?: DenoKvKey;
 }
 
 export interface KvListOptions {
@@ -43,35 +48,46 @@ export interface KvCommitResult {
 }
 
 export interface KvAtomicOperation {
-  check(...checks: { key: KvKey; versionstamp: string | null }[]): this;
+  check(...checks: { key: DenoKvKey; versionstamp: string | null }[]): this;
   mutate(...mutations: unknown[]): this;
-  sum(key: KvKey, n: bigint): this;
-  set(key: KvKey, value: unknown, options?: { expireIn?: number }): this;
-  delete(key: KvKey): this;
+  sum(key: DenoKvKey, n: bigint): this;
+  set(key: DenoKvKey, value: unknown, options?: { expireIn?: number }): this;
+  delete(key: DenoKvKey): this;
   commit(): Promise<KvCommitResult | null>;
 }
 
 export interface Kv {
-  get<T = unknown>(key: KvKey): Promise<KvEntry<T> | null>;
+  get<T = unknown>(key: DenoKvKey): Promise<KvEntry<T> | null>;
   getMany<T extends readonly unknown[]>(
-    keys: readonly KvKey[],
+    keys: readonly DenoKvKey[],
   ): Promise<(KvEntry<T[number]> | null)[]>;
   set(
-    key: KvKey,
+    key: DenoKvKey,
     value: unknown,
     options?: { expireIn?: number },
   ): Promise<KvCommitResult>;
-  delete(key: KvKey): Promise<void>;
+  delete(key: DenoKvKey): Promise<void>;
   list<T = unknown>(
     selector: KvListSelector,
     options?: KvListOptions,
   ): KvListIterator<T>;
   atomic(): KvAtomicOperation;
   watch?(
-    keys: readonly KvKey[],
+    keys: readonly DenoKvKey[],
     options?: { raw?: boolean },
   ): ReadableStream<KvEntry<unknown>[]>;
+  enqueue(
+    value: unknown,
+    options?: {
+      delay?: number;
+      keysIfUndelivered?: DenoKvKey[];
+      backoffSchedule?: number[];
+    },
+  ): Promise<KvCommitResult>;
+  listenQueue(handler: (value: unknown) => Promise<void> | void): Promise<void>;
+  commitVersionstamp?(): symbol;
   close(): void;
+  [Symbol.dispose](): void;
 }
 
 interface DatabaseRow {
@@ -98,9 +114,12 @@ class PostgresKv implements Kv {
 
   /**
    * Serializes a KvKey to a JSON string for storing in PostgreSQL.
+   * Filters out symbols since PostgreSQL cannot store them.
    */
-  private _serializeKey(key: KvKey): string {
-    return JSON.stringify(key);
+  private _serializeKey(key: DenoKvKey): string {
+    // Filter out symbols as PostgreSQL cannot store them
+    const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
+    return JSON.stringify(filteredKey);
   }
 
   /**
@@ -114,7 +133,7 @@ class PostgresKv implements Kv {
     };
   }
 
-  async get<T = unknown>(key: KvKey): Promise<KvEntry<T> | null> {
+  async get<T = unknown>(key: DenoKvKey): Promise<KvEntry<T> | null> {
     const rows = await this.sql<PostgresRow[]>`
       SELECT key_path, value, versionstamp
       FROM deno_kv
@@ -129,7 +148,7 @@ class PostgresKv implements Kv {
   }
 
   async getMany<T extends readonly unknown[]>(
-    keys: readonly KvKey[],
+    keys: readonly DenoKvKey[],
   ): Promise<Array<KvEntry<T[number]> | null>> {
     if (keys.length === 0) {
       return [];
@@ -153,15 +172,13 @@ class PostgresKv implements Kv {
   }
 
   async set(
-    key: KvKey,
+    key: DenoKvKey,
     value: unknown,
     options?: { expireIn?: number },
   ): Promise<KvCommitResult> {
     const serializedKey = this._serializeKey(key);
     const serializedValue = JSON.stringify(value);
-    const expiresAt = options?.expireIn
-      ? new Date(Date.now() + options.expireIn)
-      : null;
+    const expiresAt = options?.expireIn ? new Date(Date.now() + options.expireIn) : null;
 
     const result = await this.sql<{ versionstamp: number }[]>`
       INSERT INTO deno_kv (key_path, value, expires_at)
@@ -179,7 +196,7 @@ class PostgresKv implements Kv {
     };
   }
 
-  async delete(key: KvKey): Promise<void> {
+  async delete(key: DenoKvKey): Promise<void> {
     await this.sql`
       DELETE FROM deno_kv
       WHERE key_path = ${this._serializeKey(key)}
@@ -289,10 +306,36 @@ class PostgresKv implements Kv {
       "The `watch` operation is not supported by this PostgreSQL KV wrapper.",
     );
   }
-  enqueue(): never {
+
+  async enqueue(
+    value: unknown,
+    options?: {
+      delay?: number;
+      keysIfUndelivered?: DenoKvKey[];
+      backoffSchedule?: number[];
+    },
+  ): Promise<KvCommitResult> {
     throw new Error(
       "The `enqueue` operation is not supported by this PostgreSQL KV wrapper.",
     );
+  }
+
+  async listenQueue(
+    handler: (value: unknown) => Promise<void> | void,
+  ): Promise<void> {
+    throw new Error(
+      "The `listenQueue` operation is not supported by this PostgreSQL KV wrapper.",
+    );
+  }
+
+  commitVersionstamp?(): symbol {
+    throw new Error(
+      "The `commitVersionstamp` operation is not supported by this PostgreSQL KV wrapper.",
+    );
+  }
+
+  [Symbol.dispose](): void {
+    // No-op for compatibility
   }
 
   async close(): Promise<void> {
@@ -306,17 +349,21 @@ class PostgresKv implements Kv {
 class PostgresAtomicOperation implements KvAtomicOperation {
   private sql: postgres.Sql;
   private operations: Array<(tx: postgres.Sql) => Promise<unknown>> = [];
-  private checks: Array<{ key: KvKey; versionstamp: string | null }> = [];
+  private checks: Array<{ key: DenoKvKey; versionstamp: string | null }> = [];
 
   constructor(sql: postgres.Sql) {
     this.sql = sql;
   }
 
-  private _serializeKey(key: KvKey): string {
-    return JSON.stringify(key);
+  private _serializeKey(key: DenoKvKey): string {
+    // Filter out symbols as PostgreSQL cannot store them
+    const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
+    return JSON.stringify(filteredKey);
   }
 
-  check(...checks: Array<{ key: KvKey; versionstamp: string | null }>): this {
+  check(
+    ...checks: Array<{ key: DenoKvKey; versionstamp: string | null }>
+  ): this {
     this.checks.push(...checks);
     return this;
   }
@@ -324,7 +371,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
   mutate(
     ...mutations: Array<{
       type: string;
-      key: KvKey;
+      key: DenoKvKey;
       value?: unknown;
       expireIn?: number;
     }>
@@ -345,7 +392,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     return this;
   }
 
-  sum(key: KvKey, n: bigint): this {
+  sum(key: DenoKvKey, n: bigint): this {
     const serializedKey = this._serializeKey(key);
     this.operations.push(async (tx) => {
       // Note: This operation is complex and requires careful handling of types.
@@ -365,12 +412,10 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     return this;
   }
 
-  set(key: KvKey, value: unknown, options?: { expireIn?: number }): this {
+  set(key: DenoKvKey, value: unknown, options?: { expireIn?: number }): this {
     const serializedKey = this._serializeKey(key);
     const serializedValue = JSON.stringify(value);
-    const expiresAt = options?.expireIn
-      ? new Date(Date.now() + options.expireIn)
-      : null;
+    const expiresAt = options?.expireIn ? new Date(Date.now() + options.expireIn) : null;
 
     this.operations.push(async (tx) => {
       await tx`
@@ -383,7 +428,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     return this;
   }
 
-  delete(key: KvKey): this {
+  delete(key: DenoKvKey): this {
     const serializedKey = this._serializeKey(key);
     this.operations.push(async (tx) => {
       await tx`DELETE FROM deno_kv WHERE key_path = ${serializedKey}`;
@@ -401,8 +446,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
             WHERE key_path = ${this._serializeKey(check.key)}
               AND (expires_at IS NULL OR expires_at > NOW())
           `;
-          const currentVersion =
-            rows.length > 0 ? rows[0].versionstamp.toString() : null;
+          const currentVersion = rows.length > 0 ? rows[0].versionstamp.toString() : null;
           if (currentVersion !== check.versionstamp) {
             throw new Error("Atomic check failed");
           }

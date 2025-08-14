@@ -1,5 +1,10 @@
-import { assertEquals, assertNotEquals, assert, assertFalse } from "https://deno.land/std@0.208.0/assert/mod.ts";
-import { hash, verify, validatePasswordStrength, PASSWORD_CONFIG } from "../src/utils/password.ts";
+import {
+  assert,
+  assertEquals,
+  assertFalse,
+  assertNotEquals,
+} from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { hash, PASSWORD_CONFIG, validatePasswordStrength, verify } from "../src/utils/password.ts";
 
 Deno.test("Password Hashing - Basic functionality", async () => {
   const password = "testPassword123";
@@ -99,7 +104,10 @@ Deno.test("Password Validation - Valid passwords", () => {
 
   for (const password of validPasswords) {
     const result = validatePasswordStrength(password);
-    assert(result.valid, `Password should be valid: ${password}, errors: ${result.errors.join(", ")}`);
+    assert(
+      result.valid,
+      `Password should be valid: ${password}, errors: ${result.errors.join(", ")}`,
+    );
     assertEquals(result.errors.length, 0);
   }
 });
@@ -117,8 +125,10 @@ Deno.test("Password Validation - Invalid passwords", () => {
     const result = validatePasswordStrength(password);
     assertFalse(result.valid, `Password should be invalid: ${password}`);
     assert(result.errors.length > 0);
-    assert(result.errors.some(error => error.includes(expectedError)),
-           `Expected error containing "${expectedError}", got: ${result.errors.join(", ")}`);
+    assert(
+      result.errors.some((error) => error.includes(expectedError)),
+      `Expected error containing "${expectedError}", got: ${result.errors.join(", ")}`,
+    );
   }
 });
 
