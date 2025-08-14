@@ -113,7 +113,7 @@ class PostgresKv implements Kv {
    * Serializes a KvKey to a JSON string for storing in PostgreSQL.
    * Filters out symbols since PostgreSQL cannot store them.
    */
-  private _serializeKey(key: DenoKvKey): KvKey {
+  private _serializeKey(key: DenoKvKey): string {
     try {
       // Filter out symbols as PostgreSQL cannot store them
       const filteredKey = key.filter(
@@ -123,17 +123,17 @@ class PostgresKv implements Kv {
       // Ensure we have an array
       if (!Array.isArray(key)) {
         console.warn("[PG-KV] Key is not an array:", key);
-        return [key as unknown as KvKeyPart];
+        return JSON.stringify([key]);
       }
 
-      return filteredKey;
+      return JSON.stringify(filteredKey);
     } catch (error) {
       console.error("[PG-KV] Error serializing key:", {
         key,
         error: (error as Error).message,
       });
       // Fallback - treat as single key
-      return [String(key)];
+      return JSON.stringify([String(key)]);
     }
   }
 
@@ -202,7 +202,7 @@ class PostgresKv implements Kv {
       let result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
-         WHERE key_path = $1
+         WHERE key_path = $1::jsonb
          AND (expires_at IS NULL OR expires_at > NOW())`,
         [serializedKey],
       );
@@ -213,9 +213,9 @@ class PostgresKv implements Kv {
         result = await this.pool.query(
           `SELECT key_path, value, versionstamp::text as versionstamp
            FROM deno_kv
-           WHERE key_path = $1
+           WHERE key_path = $1::jsonb
            AND (expires_at IS NULL OR expires_at > NOW())`,
-          [legacyKey],
+          [JSON.stringify([legacyKey])],
         );
       }
 
@@ -245,12 +245,14 @@ class PostgresKv implements Kv {
       const legacyKeys = keys.map((key) => key.join(","));
       const allKeys = [...serializedKeys, ...legacyKeys];
 
+      const placeholders = allKeys.map((_, i) => `$${i + 1}::jsonb`).join(", ");
+
       const result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
-         WHERE key_path = ANY($1)
+         WHERE key_path IN (${placeholders})
          AND (expires_at IS NULL OR expires_at > NOW())`,
-        [allKeys],
+        allKeys,
       );
 
       // Create a map for quick lookups to maintain order
@@ -284,14 +286,14 @@ class PostgresKv implements Kv {
   ): Promise<KvCommitResult> {
     try {
       const serializedKey = this._serializeKey(key);
-      const serializedValue = value; // Store value directly for JSONB column
+      const serializedValue = JSON.stringify(value);
       const expiresAt = options?.expireIn
         ? new Date(Date.now() + options.expireIn).toISOString()
         : null;
 
       const result = await this.pool.query(
         `INSERT INTO deno_kv (key_path, value, expires_at)
-         VALUES ($1, $2, $3)
+         VALUES ($1::jsonb, $2::jsonb, $3)
          ON CONFLICT (key_path) DO UPDATE SET
            value = EXCLUDED.value,
            expires_at = EXCLUDED.expires_at,
@@ -351,18 +353,18 @@ class PostgresKv implements Kv {
         // Selector Logic
         if ("prefix" in selector) {
           // Use JSONB containment operator for prefix matching
-          whereClauses.push(`key_path @> $${paramIndex}`);
+          whereClauses.push(`key_path @> $${paramIndex}::jsonb`);
           params.push(JSON.stringify(selector.prefix));
           paramIndex++;
         } else {
           // Range selector
           if (selector.start) {
-            whereClauses.push(`key_path >= $${paramIndex}`);
+            whereClauses.push(`key_path >= $${paramIndex}::jsonb`);
             params.push(this._serializeKey(selector.start));
             paramIndex++;
           }
           if (selector.end) {
-            whereClauses.push(`key_path < $${paramIndex}`);
+            whereClauses.push(`key_path < $${paramIndex}::jsonb`);
             params.push(this._serializeKey(selector.end));
             paramIndex++;
           }
@@ -378,13 +380,13 @@ class PostgresKv implements Kv {
             cursorKey = cursor;
           }
           if (reverse) {
-            whereClauses.push(`key_path < $${paramIndex}`);
+            whereClauses.push(`key_path < $${paramIndex}::jsonb`);
           } else {
-            whereClauses.push(`key_path > $${paramIndex}`);
+            whereClauses.push(`key_path > $${paramIndex}::jsonb`);
           }
           params.push(
             Array.isArray(cursorKey)
-              ? cursorKey
+              ? JSON.stringify(cursorKey)
               : this._serializeKey(cursorKey),
           );
           paramIndex++;
@@ -475,9 +477,9 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     this.pool = pool;
   }
 
-  private _serializeKey(key: DenoKvKey): KvKey {
+  private _serializeKey(key: DenoKvKey): string {
     const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
-    return filteredKey;
+    return JSON.stringify(filteredKey);
   }
 
   check(
@@ -524,7 +526,11 @@ class PostgresAtomicOperation implements KvAtomicOperation {
              (((deno_kv.value->>'value')::bigint + $3)::text)::jsonb
            )
          WHERE deno_kv.value->>'type' = 'bigint'`,
-        [serializedKey, { value: n.toString(), type: "bigint" }, n.toString()],
+        [
+          serializedKey,
+          JSON.stringify({ value: n.toString(), type: "bigint" }),
+          n.toString(),
+        ],
       );
     });
     return this;
@@ -532,7 +538,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
 
   set(key: DenoKvKey, value: unknown, options?: { expireIn?: number }): this {
     const serializedKey = this._serializeKey(key);
-    const serializedValue = value; // Store value directly for JSONB column
+    const serializedValue = JSON.stringify(value);
     const expiresAt = options?.expireIn
       ? new Date(Date.now() + options.expireIn).toISOString()
       : null;
@@ -540,7 +546,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     this.operations.push(async (client) => {
       await client.query(
         `INSERT INTO deno_kv (key_path, value, expires_at)
-         VALUES ($1, $2, $3)
+         VALUES ($1::jsonb, $2::jsonb, $3)
          ON CONFLICT (key_path) DO UPDATE SET
            value = EXCLUDED.value,
            expires_at = EXCLUDED.expires_at,
@@ -554,7 +560,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
   delete(key: DenoKvKey): this {
     const serializedKey = this._serializeKey(key);
     this.operations.push(async (client) => {
-      await client.query(`DELETE FROM deno_kv WHERE key_path = $1`, [
+      await client.query(`DELETE FROM deno_kv WHERE key_path = $1::jsonb`, [
         serializedKey,
       ]);
     });
@@ -571,7 +577,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
       for (const check of this.checks) {
         const result = await client.query(
           `SELECT versionstamp::text as versionstamp FROM deno_kv
-           WHERE key_path = $1 AND (expires_at IS NULL OR expires_at > NOW())`,
+           WHERE key_path = $1::jsonb AND (expires_at IS NULL OR expires_at > NOW())`,
           [this._serializeKey(check.key)],
         );
 
@@ -655,51 +661,116 @@ async function migrateLegacyData(pool: Pool): Promise<void> {
   try {
     console.log("[PG-KV] Checking for legacy data to migrate...");
 
-    // First, check if there's any data that needs migration
-    const legacyDataCheck = await pool.query(`
-      SELECT COUNT(*) as count FROM deno_kv
-      WHERE (key_path::text LIKE '%,%' AND key_path::text NOT LIKE '[%]%')
-         OR (value::text LIKE '"%"' AND value::text NOT LIKE '{%}%' AND value::text NOT LIKE '[%]%')
-    `);
+    // First, check if there's any data in the table
+    const totalDataCheck = await pool.query(
+      `SELECT COUNT(*) as count FROM deno_kv`,
+    );
+    const totalCount = parseInt(totalDataCheck.rows[0].count);
 
-    const legacyCount = parseInt(legacyDataCheck.rows[0].count);
-    if (legacyCount === 0) {
-      console.log("[PG-KV] No legacy data found, migration skipped");
+    if (totalCount === 0) {
+      console.log("[PG-KV] No data found in table, migration skipped");
       return;
     }
 
     console.log(
-      `[PG-KV] Found ${legacyCount} legacy records, starting migration...`,
+      `[PG-KV] Found ${totalCount} total records, checking for problematic data...`,
     );
 
-    // Migrate comma-separated keys to JSON arrays
+    // Check for any non-JSONB data by trying to access jsonb functions
+    let problematicCount = 0;
+    try {
+      const problematicDataCheck = await pool.query(`
+        SELECT COUNT(*) as count FROM deno_kv
+        WHERE NOT (
+          (key_path::text ~ '^\\[.*\\]$' OR key_path::text ~ '^\\{.*\\}$') AND
+          (value::text ~ '^\\[.*\\]$' OR value::text ~ '^\\{.*\\}$' OR value::text ~ '^".*"$' OR value::text ~ '^[0-9]+(\\.[0-9]+)?$' OR value::text IN ('true', 'false', 'null'))
+        )
+      `);
+      problematicCount = parseInt(problematicDataCheck.rows[0].count);
+    } catch {
+      // If the check fails, assume all data needs migration
+      problematicCount = totalCount;
+    }
+
+    if (problematicCount === 0) {
+      console.log("[PG-KV] No problematic data found, migration skipped");
+      return;
+    }
+
+    console.log(
+      `[PG-KV] Found ${problematicCount} records that may need migration...`,
+    );
+
+    // Drop and recreate table with proper structure to handle existing bad data
+    console.log("[PG-KV] Backing up existing data...");
     await pool.query(`
-      UPDATE deno_kv
-      SET key_path = ('["' || replace(key_path::text, ',', '","') || '"]')::jsonb
-      WHERE key_path::text LIKE '%,%'
-        AND key_path::text NOT LIKE '[%]%'
-        AND key_path::text !~ '^[{[]'
+      CREATE TABLE IF NOT EXISTS deno_kv_backup_${Date.now()} AS
+      SELECT * FROM deno_kv
     `);
 
-    // Migrate JSON string values to proper JSONB (for simple string values)
+    // Create a temporary table with text columns
     await pool.query(`
-      UPDATE deno_kv
-      SET value = ('"' || value::text || '"')::jsonb
-      WHERE value::text NOT LIKE '{%}%'
-        AND value::text NOT LIKE '[%]%'
-        AND value::text NOT LIKE '"%"'
-        AND value::text !~ '^[{[]'
-        AND length(value::text) > 0
+      CREATE TEMP TABLE deno_kv_temp (
+        versionstamp BIGINT,
+        key_path_raw TEXT,
+        value_raw TEXT,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ
+      )
     `);
 
-    // Handle already quoted string values that are double-encoded
+    // Copy all data to temp table as text
     await pool.query(`
-      UPDATE deno_kv
-      SET value = value::text::jsonb
-      WHERE value::text LIKE '"%"'
-        AND value::text NOT LIKE '{%}%'
-        AND value::text NOT LIKE '[%]%'
+      INSERT INTO deno_kv_temp
+      SELECT versionstamp, key_path::text, value::text, expires_at, created_at, updated_at
+      FROM deno_kv
     `);
+
+    // Clear the original table
+    await pool.query(`DELETE FROM deno_kv`);
+
+    // Migrate data from temp table with proper conversion
+    await pool.query(`
+      INSERT INTO deno_kv (key_path, value, expires_at, created_at, updated_at)
+      SELECT
+        CASE
+          -- Handle array-like strings: ["a","b","c"]
+          WHEN key_path_raw ~ '^\\[.*\\]$' THEN key_path_raw::jsonb
+          -- Handle comma-separated: a,b,c
+          WHEN key_path_raw ~ ',' THEN ('["' || replace(key_path_raw, ',', '","') || '"]')::jsonb
+          -- Handle single values
+          ELSE ('["' || key_path_raw || '"]')::jsonb
+        END as key_path,
+        CASE
+          -- Already valid JSON
+          WHEN value_raw ~ '^[\\[\\{].*[\\]\\}]$' THEN value_raw::jsonb
+          -- Quoted strings
+          WHEN value_raw ~ '^".*"$' THEN value_raw::jsonb
+          -- Numbers
+          WHEN value_raw ~ '^[0-9]+(\\.[0-9]+)?$' THEN value_raw::jsonb
+          -- Booleans
+          WHEN value_raw IN ('true', 'false') THEN value_raw::jsonb
+          -- Null
+          WHEN value_raw = 'null' THEN 'null'::jsonb
+          -- Everything else as quoted string
+          ELSE ('"' || replace(value_raw, '"', '\\"') || '"')::jsonb
+        END as value,
+        expires_at,
+        COALESCE(created_at, NOW()),
+        COALESCE(updated_at, NOW())
+      FROM deno_kv_temp
+    `);
+
+    const migratedCount = await pool.query(
+      `SELECT COUNT(*) as count FROM deno_kv`,
+    );
+    console.log(
+      `[PG-KV] Successfully migrated ${migratedCount.rows[0].count} records`,
+    );
+
+    // Drop temp table
+    await pool.query(`DROP TABLE deno_kv_temp`);
 
     console.log("[PG-KV] Legacy data migration completed successfully");
   } catch (error) {
