@@ -34,7 +34,7 @@ The server supports two KV storage backends that can be switched via environment
 ```bash
 # Use Deno KV (default)
 KV_PROVIDER=deno
-ABRACADABRA_KV_PATH=./data/kv.db  # Optional, defaults to ./data/kv.db
+DENO_KV_PATH=./data/kv.db  # Optional, defaults to ./data/kv.db
 ```
 
 ### 2. PostgreSQL KV
@@ -125,7 +125,7 @@ Railway supports both Deno KV and PostgreSQL modes.
 
 ```bash
 KV_PROVIDER=deno
-ABRACADABRA_KV_PATH=/app/data/kv.db
+DENO_KV_PATH=/app/data/kv.db
 ```
 
 **For PostgreSQL mode:**

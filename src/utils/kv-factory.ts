@@ -17,8 +17,9 @@ function getKvConfigFromEnv(): KvConfig {
   const provider = (Deno.env.get("KV_PROVIDER") || "deno").toLowerCase() as
     | "deno"
     | "postgres";
-  const denoKvPath = Deno.env.get("ABRACADABRA_KV_PATH") || "./data/kv.db";
-  const postgresUrl = Deno.env.get("DATABASE_URL") || Deno.env.get("POSTGRES_URL");
+  const denoKvPath = Deno.env.get("DENO_KV_PATH") || "./data/kv.db";
+  const postgresUrl =
+    Deno.env.get("DATABASE_URL") || Deno.env.get("POSTGRES_URL");
 
   return {
     provider,
@@ -45,9 +46,10 @@ export async function createKv(config?: Partial<KvConfig>): Promise<Deno.Kv> {
       }
 
       console.log(
-        `[KV] Using PostgreSQL KV provider with URL: ${
-          finalConfig.postgresUrl.replace(/\/\/[^@]+@/, "//*****@")
-        }`,
+        `[KV] Using PostgreSQL KV provider with URL: ${finalConfig.postgresUrl.replace(
+          /\/\/[^@]+@/,
+          "//*****@",
+        )}`,
       );
       const pgKv = await openKvPostgres(finalConfig.postgresUrl);
       return pgKv as unknown as Deno.Kv;

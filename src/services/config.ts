@@ -296,7 +296,7 @@ export class ConfigService {
     const envMappings = {
       ABRACADABRA_PORT: "server.port",
       ABRACADABRA_HOST: "server.host",
-      ABRACADABRA_KV_PATH: "database.kv_path",
+      DENO_KV_PATH: "database.kv_path",
       ABRACADABRA_JWT_SECRET: "authentication.jwt_secret",
       ABRACADABRA_SESSION_TIMEOUT: "authentication.session_timeout",
       ABRACADABRA_UPLOAD_STRATEGY: "file_storage.upload_strategy",

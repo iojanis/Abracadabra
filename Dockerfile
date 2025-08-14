@@ -41,7 +41,7 @@ RUN mkdir -p /app/uploads && chown -R appuser:appuser /app/uploads
 
 # Set environment variables
 ENV DENO_ENV=production
-ENV ABRACADABRA_KV_PATH=/app/data/kv/abracadabra.db
+ENV DENO_KV_PATH=/app/data/kv/abracadabra.db
 ENV ABRACADABRA_UPLOAD_PATH=/app/uploads
 ENV ABRACADABRA_LOG_LEVEL=INFO
 ENV ABRACADABRA_PORT=8787

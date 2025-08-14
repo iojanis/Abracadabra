@@ -1,4 +1,8 @@
-import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+} from "https://deno.land/std@0.208.0/assert/mod.ts";
 import {
   createKv,
   createKvFromEnv,
@@ -9,12 +13,12 @@ import {
 Deno.test("KV Factory - Default configuration (Deno KV)", async () => {
   // Save original env vars
   const originalProvider = Deno.env.get("KV_PROVIDER");
-  const originalKvPath = Deno.env.get("ABRACADABRA_KV_PATH");
+  const originalKvPath = Deno.env.get("DENO_KV_PATH");
 
   try {
     // Set up test environment
     Deno.env.delete("KV_PROVIDER");
-    Deno.env.delete("ABRACADABRA_KV_PATH");
+    Deno.env.delete("DENO_KV_PATH");
 
     const config = getKvConfig();
     assertEquals(config.provider, "deno");
@@ -37,7 +41,7 @@ Deno.test("KV Factory - Default configuration (Deno KV)", async () => {
   } finally {
     // Restore original env vars
     if (originalProvider) Deno.env.set("KV_PROVIDER", originalProvider);
-    if (originalKvPath) Deno.env.set("ABRACADABRA_KV_PATH", originalKvPath);
+    if (originalKvPath) Deno.env.set("DENO_KV_PATH", originalKvPath);
   }
 });
 
@@ -60,7 +64,9 @@ Deno.test("KV Factory - PostgreSQL configuration validation", () => {
   const invalidValidation = validateKvConfig(invalidConfig);
   assert(!invalidValidation.valid);
   assert(
-    invalidValidation.errors.some((err) => err.includes("PostgreSQL URL is required")),
+    invalidValidation.errors.some((err) =>
+      err.includes("PostgreSQL URL is required"),
+    ),
   );
 });
 
@@ -77,13 +83,13 @@ Deno.test("KV Factory - Invalid provider configuration", () => {
 Deno.test("KV Factory - Environment variable configuration", () => {
   // Save original env vars
   const originalProvider = Deno.env.get("KV_PROVIDER");
-  const originalKvPath = Deno.env.get("ABRACADABRA_KV_PATH");
+  const originalKvPath = Deno.env.get("DENO_KV_PATH");
   const originalDbUrl = Deno.env.get("DATABASE_URL");
 
   try {
     // Test Deno KV environment
     Deno.env.set("KV_PROVIDER", "deno");
-    Deno.env.set("ABRACADABRA_KV_PATH", "/custom/path/kv.db");
+    Deno.env.set("DENO_KV_PATH", "/custom/path/kv.db");
 
     const denoConfig = getKvConfig();
     assertEquals(denoConfig.provider, "deno");
@@ -105,9 +111,9 @@ Deno.test("KV Factory - Environment variable configuration", () => {
     }
 
     if (originalKvPath) {
-      Deno.env.set("ABRACADABRA_KV_PATH", originalKvPath);
+      Deno.env.set("DENO_KV_PATH", originalKvPath);
     } else {
-      Deno.env.delete("ABRACADABRA_KV_PATH");
+      Deno.env.delete("DENO_KV_PATH");
     }
 
     if (originalDbUrl) {
@@ -195,12 +201,12 @@ Deno.test(
   async () => {
     // Save original env vars
     const originalProvider = Deno.env.get("KV_PROVIDER");
-    const originalKvPath = Deno.env.get("ABRACADABRA_KV_PATH");
+    const originalKvPath = Deno.env.get("DENO_KV_PATH");
 
     try {
       // Set up test environment for Deno KV
       Deno.env.set("KV_PROVIDER", "deno");
-      Deno.env.set("ABRACADABRA_KV_PATH", ":memory:");
+      Deno.env.set("DENO_KV_PATH", ":memory:");
 
       const kv = await createKvFromEnv();
       assert(kv, "Should create KV instance from environment");
@@ -220,9 +226,9 @@ Deno.test(
       }
 
       if (originalKvPath) {
-        Deno.env.set("ABRACADABRA_KV_PATH", originalKvPath);
+        Deno.env.set("DENO_KV_PATH", originalKvPath);
       } else {
-        Deno.env.delete("ABRACADABRA_KV_PATH");
+        Deno.env.delete("DENO_KV_PATH");
       }
     }
   },
@@ -250,12 +256,10 @@ Deno.test("KV Factory - Deno KV list operations", async () => {
 
     // Test range listing
     const posts: any[] = [];
-    for await (
-      const entry of kv.list({
-        start: ["posts"],
-        end: ["posts", "\x7f"],
-      })
-    ) {
+    for await (const entry of kv.list({
+      start: ["posts"],
+      end: ["posts", "\x7f"],
+    })) {
       posts.push(entry);
     }
 
