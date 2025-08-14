@@ -10,6 +10,7 @@ import { type ConfigService, createConfigService } from "./services/config.ts";
 import { createLoggingService, getLogger } from "./services/logging.ts";
 import { ensureNodeJSMethods } from "./extensions/websocket-polyfill.ts";
 import type { ServerConfig } from "./types/index.ts";
+import type { Kv } from "./utils/pg-kv.ts";
 
 // Import services
 import { AuthService, createAuthService } from "./auth.ts";
@@ -44,6 +45,13 @@ import { AdminRoutes } from "./routes/admin.ts";
 import { UploadRoutes } from "./routes/uploads.ts";
 import { DocsRoutes } from "./routes/docs.ts";
 
+// Import KV factory
+import {
+  createKvFromEnv,
+  validateKvConfig,
+  getKvConfig,
+} from "./utils/kv-factory.ts";
+
 // Import authentication middleware
 import {
   apiCors,
@@ -61,7 +69,7 @@ import type { SessionMiddleware } from "./middleware/session.ts";
 
 class AbracadabraServer {
   private app: Hono;
-  private kv!: Deno.Kv;
+  private kv!: Kv;
   private config!: ServerConfig;
   private hocuspocus!: Hocuspocus;
   private logger!: ReturnType<typeof getLogger>;
@@ -122,12 +130,27 @@ class AbracadabraServer {
   private async initializeServices(): Promise<void> {
     this.logger.info("Initializing core services...");
 
-    // Initialize Deno KV
-    const kvPath = Deno.env.get("ABRACADABRA_KV_PATH") || "./data/kv.db";
-    this.kv = await Deno.openKv(kvPath);
-    this.logger.info("Deno KV initialized", {
-      kvPath: kvPath || "./data/kv.db",
-    });
+    // Validate KV configuration
+    const kvConfigValidation = validateKvConfig();
+    if (!kvConfigValidation.valid) {
+      throw new Error(
+        `Invalid KV configuration: ${kvConfigValidation.errors.join(", ")}`,
+      );
+    }
+
+    // Initialize KV store (Deno KV or PostgreSQL)
+    const kvConfig = getKvConfig();
+    this.kv = await createKvFromEnv();
+    this.logger.info(
+      `KV store initialized using ${kvConfig.provider} provider`,
+      {
+        provider: kvConfig.provider,
+        ...(kvConfig.provider === "deno" && { path: kvConfig.denoKvPath }),
+        ...(kvConfig.provider === "postgres" && {
+          hasUrl: !!kvConfig.postgresUrl,
+        }),
+      },
+    );
 
     // Initialize configuration service
     const configService = await createConfigService(this.kv);
@@ -607,10 +630,10 @@ class AbracadabraServer {
         this.logger.info("Hocuspocus server closed");
       }
 
-      // Close Deno KV
+      // Close KV store
       if (this.kv) {
         this.kv.close();
-        this.logger.info("Deno KV connection closed");
+        this.logger.info("KV store connection closed");
       }
 
       this.logger.info("Cleanup completed");
