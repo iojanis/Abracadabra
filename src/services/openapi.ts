@@ -211,7 +211,7 @@ export class OpenAPIService {
           SwaggerUIBundle.presets.apis,
           SwaggerUIBundle.presets.standalone,
         ],
-
+        layout: "BaseLayout",
         deepLinking: true,
         showExtensions: true,
         showCommonExtensions: true,
