@@ -27,8 +27,26 @@ export class ConfigService {
       // Load configuration from file
       const configData = await this.loadConfigFromFile();
 
-      // Store in KV if not already present
-      await this.initializeKvConfig(configData);
+      // For Deno Deploy, use fallback initialization if KV fails
+      const isDenoDeploy = Deno.env.get("DENO_DEPLOYMENT_ID") !== undefined;
+
+      if (isDenoDeploy) {
+        try {
+          await this.initializeKvConfig(configData);
+        } catch (kvError) {
+          logger.warn(
+            "KV initialization failed on Deno Deploy, using fallback",
+            {
+              error: (kvError as Error).message,
+            },
+          );
+          // Pre-populate cache with default configuration for Deploy
+          this.populateDeployCache(configData);
+        }
+      } else {
+        // Store in KV if not already present (local/non-Deploy environments)
+        await this.initializeKvConfig(configData);
+      }
 
       logger.info("Configuration service initialized successfully");
     } catch (error) {
@@ -52,10 +70,27 @@ export class ConfigService {
       return cached as T;
     }
 
+    // If no KV available, return null (fallback to cache-only mode)
+    if (!this.kv) {
+      logger.debug("No KV available, returning null for key", { key });
+      return null;
+    }
+
     try {
       const kvKey = ["config", key] as const;
       logger.debug("Config get operation", { key, kvKey });
-      const result = await this.kv.get(kvKey);
+
+      let result;
+      try {
+        result = await this.kv.get(kvKey);
+      } catch (kvError) {
+        logger.warn("KV get operation failed, returning null", {
+          key,
+          error: (kvError as Error).message,
+        });
+        return null;
+      }
+
       logger.debug("Config get result", {
         key,
         result: result
@@ -315,7 +350,18 @@ export class ConfigService {
         try {
           // Only set if key doesn't exist (don't override existing runtime config)
           logger.debug("Getting KV key", { key, kvKey });
-          const existing = await this.kv.get(kvKey);
+          let existing;
+
+          try {
+            existing = await this.kv.get(kvKey);
+          } catch (getError) {
+            logger.warn("KV get operation failed, treating as not exists", {
+              key,
+              error: (getError as Error).message,
+            });
+            existing = null;
+          }
+
           logger.debug("KV get result", {
             key,
             existing: existing
@@ -332,14 +378,21 @@ export class ConfigService {
             existing.value === undefined;
 
           if (shouldSet) {
-            const result = await this.kv.set(kvKey, value);
-            if (result && result.ok) {
-              logger.debug("Initialized configuration key", { key, value });
-            } else {
-              logger.warn("Failed to set configuration key", {
+            try {
+              const result = await this.kv.set(kvKey, value);
+              if (result && result.ok) {
+                logger.debug("Initialized configuration key", { key, value });
+              } else {
+                logger.warn("Failed to set configuration key", {
+                  key,
+                  error: "KV set operation failed",
+                  resultOk: result?.ok,
+                });
+              }
+            } catch (setError) {
+              logger.warn("KV set operation failed", {
                 key,
-                error: "KV set operation failed",
-                resultOk: result?.ok,
+                error: (setError as Error).message,
               });
             }
           } else {
@@ -366,6 +419,34 @@ export class ConfigService {
         kvAvailable: !!this.kv,
       });
       throw error;
+    }
+  }
+
+  /**
+   * Populate cache with default configuration for Deno Deploy fallback
+   */
+  private populateDeployCache(configData: Record<string, any>): void {
+    try {
+      const flatConfig = this.flattenObject(configData);
+
+      // Apply environment overrides
+      const overriddenConfig = this.applyEnvironmentOverrides(flatConfig);
+
+      // Populate cache directly
+      for (const [key, value] of Object.entries(overriddenConfig)) {
+        this.setCache(key, value);
+      }
+
+      logger.info(
+        "Populated cache with fallback configuration for Deno Deploy",
+        {
+          keyCount: Object.keys(overriddenConfig).length,
+        },
+      );
+    } catch (error) {
+      logger.error("Failed to populate Deploy cache", {
+        error: (error as Error).message,
+      });
     }
   }
 
