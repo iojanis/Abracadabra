@@ -13,11 +13,26 @@ import type { ServerConfig } from "./types/index.ts";
 
 // Import services
 import { AuthService, createAuthService } from "./auth.ts";
-import { createDocumentService, type DocumentService } from "./services/documents.ts";
-import { createPermissionService, type PermissionService } from "./services/permissions.ts";
-import { createScriptsService, type ScriptsService } from "./services/scripts.ts";
-import { createUploadsService, type UploadsService } from "./services/uploads.ts";
-import { createOpenAPIService, type OpenAPIService } from "./services/openapi.ts";
+import {
+  createDocumentService,
+  type DocumentService,
+} from "./services/documents.ts";
+import {
+  createPermissionService,
+  type PermissionService,
+} from "./services/permissions.ts";
+import {
+  createScriptsService,
+  type ScriptsService,
+} from "./services/scripts.ts";
+import {
+  createUploadsService,
+  type UploadsService,
+} from "./services/uploads.ts";
+import {
+  createOpenAPIService,
+  type OpenAPIService,
+} from "./services/openapi.ts";
 
 // Import middleware
 import { createSessionMiddleware } from "./middleware/session.ts";
@@ -30,10 +45,20 @@ import { UploadRoutes } from "./routes/uploads.ts";
 import { DocsRoutes } from "./routes/docs.ts";
 
 // Import KV factory
-import { createKvFromEnv, getKvConfig, validateKvConfig } from "./utils/kv-factory.ts";
+import {
+  createKvFromEnv,
+  getKvConfig,
+  validateKvConfig,
+} from "./utils/kv-factory.ts";
 
 // Import authentication middleware
-import { apiCors, optionalAuth, rateLimit, requireAdmin, requireAuth } from "./middleware/auth.ts";
+import {
+  apiCors,
+  optionalAuth,
+  rateLimit,
+  requireAdmin,
+  requireAuth,
+} from "./middleware/auth.ts";
 
 // Import Hocuspocus extension
 import { DenoKvExtension } from "./extensions/deno-kv.ts";
@@ -523,8 +548,7 @@ class AbracadabraServer {
     // Log available collaboration endpoints
     this.logger.info("Collaboration endpoints available", {
       websocket: "/collaborate/*",
-      note:
-        "WebSocket connections support both authenticated and anonymous users for public documents",
+      note: "WebSocket connections support both authenticated and anonymous users for public documents",
     });
   }
 
@@ -559,7 +583,7 @@ class AbracadabraServer {
     const shutdown = async (signal: string) => {
       this.logger.info("Received shutdown signal", { signal });
       await this.cleanup();
-      //Deno.exit(0);
+      Deno.exit(0);
     };
 
     // Handle process signals
@@ -626,8 +650,10 @@ class AbracadabraServer {
 
 async function bootstrap(): Promise<void> {
   const mainLogger = {
-    info: (msg: string, extra?: any) => console.info(`[INFO] bootstrap: ${msg}`, extra || {}),
-    error: (msg: string, extra?: any) => console.error(`[ERROR] bootstrap: ${msg}`, extra || {}),
+    info: (msg: string, extra?: any) =>
+      console.info(`[INFO] bootstrap: ${msg}`, extra || {}),
+    error: (msg: string, extra?: any) =>
+      console.error(`[ERROR] bootstrap: ${msg}`, extra || {}),
   };
 
   try {
