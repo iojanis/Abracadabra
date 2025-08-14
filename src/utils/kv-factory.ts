@@ -4,25 +4,7 @@
 
 import type { Kv } from "./pg-kv.ts";
 import { openKvPostgres } from "./pg-kv.ts";
-
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
-    globalThis.location?.hostname?.includes("deno.dev")
-  );
-}
-
-/**
- * Detect if running in production environment
- */
-function isProduction(): boolean {
-  const env = Deno.env.get("DENO_ENV") || Deno.env.get("NODE_ENV");
-  return env === "production" || isDenoDeploy();
-}
+import { isDenoDeploy, isProduction } from "./environment.ts";
 
 export interface KvConfig {
   provider: "deno" | "postgres";

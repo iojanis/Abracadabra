@@ -4,17 +4,7 @@
 import { getLogger } from "./logging.ts";
 import type { ConfigService } from "./config.ts";
 import type { PermissionService } from "./permissions.ts";
-
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
-    globalThis.location?.hostname?.includes("deno.dev")
-  );
-}
+import { isDenoDeploy } from "../utils/environment.ts";
 import type { FileMetadataObject } from "../types/index.ts";
 
 let logger: ReturnType<typeof getLogger> | null = null;

@@ -6,17 +6,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { getUploadsService } from "../services/uploads.ts";
 import type { FileMetadataObject } from "../types/index.ts";
-
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
-    globalThis.location?.hostname?.includes("deno.dev")
-  );
-}
+import { isDenoDeploy } from "../utils/environment.ts";
 
 /**
  * Check if uploads are supported in the current environment

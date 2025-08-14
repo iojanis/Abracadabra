@@ -11,19 +11,13 @@ import {
 } from "logtape";
 
 import type { ConfigService } from "./config.ts";
+import {
+  isDenoDeploy,
+  getEnvironmentInfo,
+  getLoggerPrefix,
+} from "../utils/environment.ts";
 
 export type AbracadabraLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
-
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
-    globalThis.location?.hostname?.includes("deno.dev")
-  );
-}
 
 interface LogContext {
   userId?: string;
@@ -52,16 +46,15 @@ export class LoggingService {
       return;
     }
 
-    const isDeployEnv = isDenoDeploy();
+    const envInfo = getEnvironmentInfo();
     const startTime = Date.now();
 
     try {
       // Determine environment and log level with Deploy detection
-      const nodeEnv = Deno.env.get("NODE_ENV");
-      const denoEnv = Deno.env.get("DENO_ENV");
-      const isDevelopment =
-        !isDeployEnv && nodeEnv !== "production" && denoEnv !== "production";
-      let logLevel: AbracadabraLogLevel = isDeployEnv ? "INFO" : "DEBUG";
+      const isDevelopment = envInfo.isDevelopment;
+      let logLevel: AbracadabraLogLevel = envInfo.isDevelopment
+        ? "DEBUG"
+        : "INFO";
 
       if (configService) {
         logLevel =
@@ -75,7 +68,7 @@ export class LoggingService {
       }
 
       // Add timeout protection for Deno Deploy
-      if (isDeployEnv) {
+      if (envInfo.isDenoDeploy) {
         await Promise.race([
           this.configureLogtape(logLevel, isDevelopment),
           new Promise((_, reject) =>
@@ -96,33 +89,21 @@ export class LoggingService {
       this.rootLogger.info("Logging service initialized", {
         logLevel,
         isDevelopment,
-        isDeployEnv,
         initTime: `${initTime}ms`,
-        deployId: isDeployEnv
-          ? Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)
-          : undefined,
-        environment: {
-          DENO_ENV: Deno.env.get("DENO_ENV"),
-          NODE_ENV: Deno.env.get("NODE_ENV"),
-          DENO_DEPLOYMENT_ID: !!Deno.env.get("DENO_DEPLOYMENT_ID"),
-          DENO_REGION: Deno.env.get("DENO_REGION"),
-        },
+        environment: envInfo,
       });
     } catch (error) {
       const initTime = Date.now() - startTime;
       const errorMsg = `Failed to initialize logging service after ${initTime}ms: ${(error as Error).message}`;
+      const logPrefix = getLoggerPrefix();
 
-      if (isDeployEnv) {
-        console.error(
-          `[Deploy:${Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)}] ${errorMsg}`,
-        );
-      } else {
-        console.error(errorMsg);
-      }
+      console.error(`${logPrefix} ${errorMsg}`);
 
       // Don't throw in Deploy environment, use fallback console logging
-      if (isDeployEnv) {
-        console.warn("Falling back to console logging on Deno Deploy");
+      if (envInfo.isDenoDeploy) {
+        console.warn(
+          `${logPrefix} Falling back to console logging on Deno Deploy`,
+        );
         this.initialized = true; // Mark as initialized to prevent retry loops
         return;
       }
@@ -325,10 +306,10 @@ export class LoggingService {
     logLevel: AbracadabraLogLevel,
     isDevelopment: boolean,
   ): Promise<void> {
-    const isDeployEnv = isDenoDeploy();
+    const envInfo = getEnvironmentInfo();
     const logtapeLevel = this.mapLogLevel(logLevel);
 
-    if (isDevelopment && !isDeployEnv) {
+    if (isDevelopment && !envInfo.isDenoDeploy) {
       // Development: Pretty console output with colors (not on Deploy)
       await configure({
         sinks: {
@@ -385,10 +366,10 @@ export class LoggingService {
               };
 
               // Add Deploy-specific context
-              if (isDeployEnv) {
+              if (envInfo.isDenoDeploy) {
                 baseLog.deployment = {
-                  id: Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8),
-                  region: Deno.env.get("DENO_REGION"),
+                  id: envInfo.deploymentId?.slice(0, 8),
+                  region: envInfo.region,
                 };
               }
 
@@ -409,10 +390,11 @@ export class LoggingService {
       try {
         await configure(config);
       } catch (configError) {
-        if (isDeployEnv) {
+        if (envInfo.isDenoDeploy) {
           // Fallback to simple console logging on Deploy if configure fails
+          const logPrefix = getLoggerPrefix();
           console.warn(
-            `[Deploy] LogTape configuration failed, using fallback: ${(configError as Error).message}`,
+            `${logPrefix} LogTape configuration failed, using fallback: ${(configError as Error).message}`,
           );
           return;
         }

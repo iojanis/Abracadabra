@@ -2,6 +2,7 @@
 // Uses standard pg library with automatic environment variable detection
 
 import { Pool, type PoolClient } from "npm:pg";
+import { isDenoDeploy } from "./environment.ts";
 
 // Define Deno KV types locally to avoid external dependencies
 export type KvKeyPart = string | number | bigint | boolean | Uint8Array;
@@ -94,17 +95,6 @@ interface DatabaseRow {
   key_path: string;
   value: string;
   versionstamp: string;
-}
-
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
-    globalThis.location?.hostname?.includes("deno.dev")
-  );
 }
 
 /**

@@ -283,7 +283,7 @@ export class ConfigService {
 
       // Only set if key doesn't exist (don't override existing runtime config)
       const existing = await this.kv.get(kvKey);
-      if (existing.value === null) {
+      if (existing === null || existing.value === null) {
         await this.kv.set(kvKey, value);
         logger.debug("Initialized configuration key", { key, value });
       }

@@ -8,48 +8,39 @@
  * Includes Deno Deploy safeguards and enhanced error handling.
  */
 
-/**
- * Detect if running on Deno Deploy
- */
-function isDenoDeploy(): boolean {
-  return Deno.env.get("DENO_DEPLOYMENT_ID") !== undefined;
-}
+import {
+  isDenoDeploy,
+  getDeploymentId,
+  getLoggerPrefix,
+} from "../utils/environment.ts";
 
 // Enhanced logger with Deno Deploy detection
 const logger = {
   debug: (message: string, extra?: any) => {
-    const deployId = isDenoDeploy()
-      ? `[Deploy:${Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)}] `
-      : "";
+    const logPrefix = getLoggerPrefix();
     console.debug(
-      `[DEBUG] ${deployId}websocket-polyfill: ${message}`,
+      `[DEBUG] ${logPrefix} websocket-polyfill: ${message}`,
       extra || {},
     );
   },
   info: (message: string, extra?: any) => {
-    const deployId = isDenoDeploy()
-      ? `[Deploy:${Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)}] `
-      : "";
+    const logPrefix = getLoggerPrefix();
     console.info(
-      `[INFO] ${deployId}websocket-polyfill: ${message}`,
+      `[INFO] ${logPrefix} websocket-polyfill: ${message}`,
       extra || {},
     );
   },
   warn: (message: string, extra?: any) => {
-    const deployId = isDenoDeploy()
-      ? `[Deploy:${Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)}] `
-      : "";
+    const logPrefix = getLoggerPrefix();
     console.warn(
-      `[WARN] ${deployId}websocket-polyfill: ${message}`,
+      `[WARN] ${logPrefix} websocket-polyfill: ${message}`,
       extra || {},
     );
   },
   error: (message: string, extra?: any) => {
-    const deployId = isDenoDeploy()
-      ? `[Deploy:${Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)}] `
-      : "";
+    const logPrefix = getLoggerPrefix();
     console.error(
-      `[ERROR] ${deployId}websocket-polyfill: ${message}`,
+      `[ERROR] ${logPrefix} websocket-polyfill: ${message}`,
       extra || {},
     );
   },
