@@ -91,35 +91,100 @@ class AbracadabraServer {
    * Initialize and start the Abracadabra server
    */
   async start(): Promise<void> {
+    const isDeployEnv = Deno.env.get("DENO_DEPLOYMENT_ID") !== undefined;
+    const startTime = Date.now();
+
     try {
       // Initialize logging first (without config service)
       await createLoggingService();
       this.logger = getLogger(["main"]);
 
-      this.logger.info("🎩 Starting Abracadabra Server...");
+      this.logger.info("🎩 Starting Abracadabra Server...", {
+        isDeployEnv,
+        startTime: new Date().toISOString(),
+      });
 
-      // 1. Initialize core services
-      await this.initializeServices();
+      // 1. Initialize core services with timeout protection
+      this.logger.info("Initializing core services...");
+      const servicesPromise = this.initializeServices();
+
+      if (isDeployEnv) {
+        await Promise.race([
+          servicesPromise,
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Service initialization timeout")),
+              30000,
+            ),
+          ),
+        ]);
+      } else {
+        await servicesPromise;
+      }
 
       // 2. Setup middleware
+      this.logger.info("Setting up middleware...");
       this.setupMiddleware();
 
       // 3. Setup routes
+      this.logger.info("Setting up routes...");
       this.setupRoutes();
 
-      // 4. Initialize real-time collaboration
-      await this.initializeCollaboration();
+      // 4. Initialize real-time collaboration with timeout protection
+      this.logger.info("Initializing real-time collaboration...");
+      const collaborationPromise = this.initializeCollaboration();
+
+      if (isDeployEnv) {
+        await Promise.race([
+          collaborationPromise,
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Collaboration initialization timeout")),
+              20000,
+            ),
+          ),
+        ]);
+      } else {
+        await collaborationPromise;
+      }
 
       // 5. Start HTTP server
+      this.logger.info("Starting HTTP server...");
       await this.startHttpServer();
 
-      this.logger.info("🚀 Abracadabra Server started successfully!");
+      const totalStartTime = Date.now() - startTime;
+      this.logger.info("🚀 Abracadabra Server started successfully!", {
+        totalStartTime: `${totalStartTime}ms`,
+        isDeployEnv,
+        port: this.config?.server?.port || 8000,
+      });
     } catch (error) {
+      const totalStartTime = Date.now() - startTime;
       this.logger.error("Failed to start Abracadabra Server", {
         error: (error as Error).message,
+        stack: (error as Error).stack?.split("\n").slice(0, 3).join("\n"),
+        totalStartTime: `${totalStartTime}ms`,
+        isDeployEnv,
       });
-      await this.cleanup();
-      //Deno.exit(1);
+
+      // Attempt cleanup with timeout protection
+      try {
+        if (isDeployEnv) {
+          await Promise.race([
+            this.cleanup(),
+            new Promise((resolve) => setTimeout(resolve, 5000)),
+          ]);
+        } else {
+          await this.cleanup();
+        }
+      } catch (cleanupError) {
+        this.logger.error("Cleanup failed during error handling", {
+          cleanupError: (cleanupError as Error).message,
+        });
+      }
+
+      // Re-throw the original error
+      throw error;
     }
   }
 
@@ -648,33 +713,153 @@ class AbracadabraServer {
 // Application Bootstrap
 // ============================================================================
 
+/**
+ * Detect if running on Deno Deploy
+ */
+function isDenoDeploy(): boolean {
+  return !!(
+    Deno.env.get("DENO_DEPLOYMENT_ID") ||
+    Deno.env.get("DENO_REGION") ||
+    globalThis.location?.hostname?.includes("deno.dev")
+  );
+}
+
+/**
+ * Enhanced bootstrap function with Deno Deploy safeguards
+ */
 async function bootstrap(): Promise<void> {
+  const isDeployEnv = isDenoDeploy();
+  const deployId = isDeployEnv
+    ? Deno.env.get("DENO_DEPLOYMENT_ID")?.slice(0, 8)
+    : null;
+  const startTime = Date.now();
+
   const mainLogger = {
-    info: (msg: string, extra?: any) =>
-      console.info(`[INFO] bootstrap: ${msg}`, extra || {}),
-    error: (msg: string, extra?: any) =>
-      console.error(`[ERROR] bootstrap: ${msg}`, extra || {}),
+    info: (msg: string, extra?: any) => {
+      const prefix = isDeployEnv ? `[Deploy:${deployId}] ` : "";
+      console.info(`[INFO] ${prefix}bootstrap: ${msg}`, extra || {});
+    },
+    error: (msg: string, extra?: any) => {
+      const prefix = isDeployEnv ? `[Deploy:${deployId}] ` : "";
+      console.error(`[ERROR] ${prefix}bootstrap: ${msg}`, extra || {});
+    },
+    warn: (msg: string, extra?: any) => {
+      const prefix = isDeployEnv ? `[Deploy:${deployId}] ` : "";
+      console.warn(`[WARN] ${prefix}bootstrap: ${msg}`, extra || {});
+    },
   };
 
   try {
-    mainLogger.info("🎩 Bootstrapping Abracadabra Server...");
+    mainLogger.info("🎩 Bootstrapping Abracadabra Server...", {
+      isDeployEnv,
+      deployId,
+      denoVersion: Deno.version.deno,
+      environment: isDeployEnv ? "production" : "development",
+    });
 
-    // Check required permissions
-    const status = await Deno.permissions.query({ name: "net" });
-    if (status.state !== "granted") {
-      throw new Error(
-        "Network permission required. Run with --allow-net flag.",
+    // Environment-specific permission checks
+    if (!isDeployEnv) {
+      // Only check permissions in local development
+      try {
+        const status = await Deno.permissions.query({ name: "net" });
+        if (status.state !== "granted") {
+          throw new Error(
+            "Network permission required. Run with --allow-net flag.",
+          );
+        }
+        mainLogger.info("Permissions verified for local development");
+      } catch (permError) {
+        mainLogger.warn("Permission check failed, proceeding anyway", {
+          error: (permError as Error).message,
+        });
+      }
+    } else {
+      mainLogger.info("Running on Deno Deploy, skipping permission checks", {
+        deploymentId: Deno.env.get("DENO_DEPLOYMENT_ID"),
+        region: Deno.env.get("DENO_REGION"),
+      });
+    }
+
+    // Environment validation
+    const requiredEnvVars = isDeployEnv ? [] : ["KV_PROVIDER"]; // Less strict on Deploy
+    const missingEnvVars = requiredEnvVars.filter(
+      (envVar) => !Deno.env.get(envVar),
+    );
+
+    if (missingEnvVars.length > 0) {
+      mainLogger.warn("Some environment variables are missing", {
+        missing: missingEnvVars,
+        isDeployEnv,
+      });
+    }
+
+    // Set production environment for Deploy
+    if (isDeployEnv && !Deno.env.get("NODE_ENV")) {
+      Deno.env.set("NODE_ENV", "production");
+      mainLogger.info("Set NODE_ENV=production for Deno Deploy");
+    }
+
+    // Create and start server with timeout protection
+    const server = new AbracadabraServer();
+
+    if (isDeployEnv) {
+      // Add startup timeout for Deno Deploy
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Server startup timeout (45s)")),
+          45000,
+        ),
+      );
+
+      await Promise.race([server.start(), timeoutPromise]);
+    } else {
+      await server.start();
+    }
+
+    const startupTime = Date.now() - startTime;
+    mainLogger.info("🚀 Abracadabra Server bootstrap completed successfully!", {
+      startupTime: `${startupTime}ms`,
+      isDeployEnv,
+      deployId,
+    });
+  } catch (error) {
+    const startupTime = Date.now() - startTime;
+    const errorDetails = {
+      error: (error as Error).message,
+      stack: (error as Error).stack?.split("\n").slice(0, 5).join("\n"),
+      startupTime: `${startupTime}ms`,
+      isDeployEnv,
+      deployId,
+      timestamp: new Date().toISOString(),
+    };
+
+    mainLogger.error("Failed to bootstrap server", errorDetails);
+
+    // Enhanced error reporting for Deno Deploy
+    if (isDeployEnv) {
+      // Log additional context for Deploy debugging
+      mainLogger.error("Deno Deploy diagnostic info", {
+        deploymentId: Deno.env.get("DENO_DEPLOYMENT_ID"),
+        region: Deno.env.get("DENO_REGION"),
+        runtime: "deno-deploy",
+        kvProvider: Deno.env.get("KV_PROVIDER"),
+        hasPostgresUrl: !!(
+          Deno.env.get("DATABASE_URL") || Deno.env.get("POSTGRES_URL")
+        ),
+      });
+    }
+
+    // In development, we might want to exit, but on Deploy we should let it retry
+    if (!isDeployEnv) {
+      mainLogger.error("Exiting due to bootstrap failure in development");
+      // Deno.exit(1); // Uncomment if needed for local development
+    } else {
+      mainLogger.error(
+        "Bootstrap failed on Deno Deploy, letting platform handle retry",
       );
     }
 
-    // Create and start server
-    const server = new AbracadabraServer();
-    await server.start();
-  } catch (error) {
-    mainLogger.error("Failed to bootstrap server", {
-      error: (error as Error).message,
-    });
-    //Deno.exit(1);
+    throw error; // Re-throw to let Deno Deploy handle the failure
   }
 }
 

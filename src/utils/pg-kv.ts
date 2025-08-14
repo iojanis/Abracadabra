@@ -1,9 +1,9 @@
-// kv_postgres.ts
+// PostgreSQL KV implementation for Deno Deploy zero configuration
+// Uses standard pg library with automatic environment variable detection
 
-import postgres from "postgres";
+import { Pool, type PoolClient } from "npm:pg";
 
 // Define Deno KV types locally to avoid external dependencies
-// Note: We exclude 'symbol' from KvKeyPart as PostgreSQL can't store symbols
 export type KvKeyPart = string | number | bigint | boolean | Uint8Array;
 export type KvKey = readonly KvKeyPart[];
 
@@ -91,25 +91,32 @@ export interface Kv {
 }
 
 interface DatabaseRow {
-  key_path: KvKey;
-  value: unknown;
-  versionstamp: number;
-}
-
-interface PostgresRow {
   key_path: string;
   value: string;
-  versionstamp: number;
+  versionstamp: string;
 }
 
 /**
- * Main class for the PostgreSQL-backed Deno KV implementation.
+ * Detect if running on Deno Deploy
+ */
+function isDenoDeploy(): boolean {
+  return !!(
+    Deno.env.get("DENO_DEPLOYMENT_ID") ||
+    Deno.env.get("DENO_REGION") ||
+    globalThis.location?.hostname?.includes("deno.dev")
+  );
+}
+
+/**
+ * Main class for the PostgreSQL-backed Deno KV implementation using zero config.
  */
 class PostgresKv implements Kv {
-  private sql: postgres.Sql;
+  private pool: Pool;
+  private isDeployEnv: boolean;
 
-  constructor(sql: postgres.Sql) {
-    this.sql = sql;
+  constructor(pool: Pool) {
+    this.pool = pool;
+    this.isDeployEnv = isDenoDeploy();
   }
 
   /**
@@ -125,26 +132,37 @@ class PostgresKv implements Kv {
   /**
    * Helper to map a database row to a KvEntry.
    */
-  private _rowToEntry<T>(row: PostgresRow): KvEntry<T> {
+  private _rowToEntry<T>(row: DatabaseRow): KvEntry<T> {
     return {
       key: JSON.parse(row.key_path),
       value: JSON.parse(row.value) as T,
-      versionstamp: row.versionstamp.toString(), // Versionstamps are strings
+      versionstamp: row.versionstamp,
     };
   }
 
   async get<T = unknown>(key: DenoKvKey): Promise<KvEntry<T> | null> {
-    const rows = await this.sql<PostgresRow[]>`
-      SELECT key_path, value, versionstamp
-      FROM deno_kv
-      WHERE key_path = ${this._serializeKey(key)}
-        AND (expires_at IS NULL OR expires_at > NOW())
-    `;
+    try {
+      const serializedKey = this._serializeKey(key);
+      const result = await this.pool.query(
+        `SELECT key_path, value, versionstamp::text as versionstamp
+         FROM deno_kv
+         WHERE key_path = $1
+         AND (expires_at IS NULL OR expires_at > NOW())`,
+        [serializedKey],
+      );
 
-    if (rows.length === 0) {
-      return null;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return this._rowToEntry<T>(result.rows[0] as DatabaseRow);
+    } catch (error) {
+      console.error(
+        "[PG-KV] Error in get operation:",
+        (error as Error).message,
+      );
+      throw error;
     }
-    return this._rowToEntry<T>(rows[0]);
   }
 
   async getMany<T extends readonly unknown[]>(
@@ -154,21 +172,32 @@ class PostgresKv implements Kv {
       return [];
     }
 
-    const serializedKeys = keys.map(this._serializeKey);
-    const rows = await this.sql<PostgresRow[]>`
-      SELECT key_path, value, versionstamp
-      FROM deno_kv
-      WHERE key_path IN ${this.sql(serializedKeys)}
-        AND (expires_at IS NULL OR expires_at > NOW())
-    `;
+    try {
+      const serializedKeys = keys.map((key) => this._serializeKey(key));
+      const placeholders = serializedKeys.map((_, i) => `$${i + 1}`).join(", ");
 
-    // Create a map for quick lookups to maintain order
-    const entryMap = new Map<string, KvEntry<T[number]>>();
-    for (const row of rows) {
-      entryMap.set(row.key_path, this._rowToEntry(row));
+      const result = await this.pool.query(
+        `SELECT key_path, value, versionstamp::text as versionstamp
+         FROM deno_kv
+         WHERE key_path IN (${placeholders})
+         AND (expires_at IS NULL OR expires_at > NOW())`,
+        serializedKeys,
+      );
+
+      // Create a map for quick lookups to maintain order
+      const entryMap = new Map<string, KvEntry<T[number]>>();
+      for (const row of result.rows) {
+        entryMap.set(row.key_path, this._rowToEntry(row as DatabaseRow));
+      }
+
+      return keys.map((key) => entryMap.get(this._serializeKey(key)) || null);
+    } catch (error) {
+      console.error(
+        "[PG-KV] Error in getMany operation:",
+        (error as Error).message,
+      );
+      throw error;
     }
-
-    return keys.map((key) => entryMap.get(this._serializeKey(key)) || null);
   }
 
   async set(
@@ -176,31 +205,50 @@ class PostgresKv implements Kv {
     value: unknown,
     options?: { expireIn?: number },
   ): Promise<KvCommitResult> {
-    const serializedKey = this._serializeKey(key);
-    const serializedValue = JSON.stringify(value);
-    const expiresAt = options?.expireIn ? new Date(Date.now() + options.expireIn) : null;
+    try {
+      const serializedKey = this._serializeKey(key);
+      const serializedValue = JSON.stringify(value);
+      const expiresAt = options?.expireIn
+        ? new Date(Date.now() + options.expireIn).toISOString()
+        : null;
 
-    const result = await this.sql<{ versionstamp: number }[]>`
-      INSERT INTO deno_kv (key_path, value, expires_at)
-      VALUES (${serializedKey}, ${serializedValue}, ${expiresAt})
-      ON CONFLICT (key_path) DO UPDATE
-      SET
-        value = EXCLUDED.value,
-        expires_at = EXCLUDED.expires_at
-      RETURNING versionstamp
-    `;
+      const result = await this.pool.query(
+        `INSERT INTO deno_kv (key_path, value, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (key_path) DO UPDATE SET
+           value = EXCLUDED.value,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = NOW()
+         RETURNING versionstamp::text as versionstamp`,
+        [serializedKey, serializedValue, expiresAt],
+      );
 
-    return {
-      ok: true,
-      versionstamp: result[0].versionstamp.toString(),
-    };
+      return {
+        ok: true,
+        versionstamp: result.rows[0].versionstamp,
+      };
+    } catch (error) {
+      console.error(
+        "[PG-KV] Error in set operation:",
+        (error as Error).message,
+      );
+      throw error;
+    }
   }
 
   async delete(key: DenoKvKey): Promise<void> {
-    await this.sql`
-      DELETE FROM deno_kv
-      WHERE key_path = ${this._serializeKey(key)}
-    `;
+    try {
+      const serializedKey = this._serializeKey(key);
+      await this.pool.query(`DELETE FROM deno_kv WHERE key_path = $1`, [
+        serializedKey,
+      ]);
+    } catch (error) {
+      console.error(
+        "[PG-KV] Error in delete operation:",
+        (error as Error).message,
+      );
+      throw error;
+    }
   }
 
   list<T = unknown>(
@@ -216,79 +264,70 @@ class PostgresKv implements Kv {
       const reverse = options?.reverse ?? false;
 
       while (true) {
-        let query = this.sql`SELECT key_path, value, versionstamp FROM deno_kv`;
-        const whereClauses = [
-          this.sql`(expires_at IS NULL OR expires_at > NOW())`,
+        let query = `SELECT key_path, value, versionstamp::text as versionstamp FROM deno_kv`;
+        const whereClauses: string[] = [
+          `(expires_at IS NULL OR expires_at > NOW())`,
         ];
+        const params: any[] = [];
+        let paramIndex = 1;
 
-        // --- Selector Logic ---
+        // Selector Logic
         if ("prefix" in selector) {
-          // Compare the text representation of the JSONB array
-          const prefixStr = JSON.stringify(selector.prefix).slice(0, -1); // "['users']" -> "['users'"
-          whereClauses.push(this.sql`key_path::text LIKE ${prefixStr + ",%"}`);
+          const prefixStr = JSON.stringify(selector.prefix).slice(0, -1); // Remove trailing ]
+          whereClauses.push(`key_path::text LIKE $${paramIndex}`);
+          params.push(prefixStr + ",%");
+          paramIndex++;
         } else {
           // Range selector
           if (selector.start) {
-            whereClauses.push(
-              this.sql`key_path::text >= ${this._serializeKey(selector.start)}`,
-            );
+            whereClauses.push(`key_path::text >= $${paramIndex}`);
+            params.push(this._serializeKey(selector.start));
+            paramIndex++;
           }
           if (selector.end) {
-            whereClauses.push(
-              this.sql`key_path::text < ${this._serializeKey(selector.end)}`,
-            );
+            whereClauses.push(`key_path::text < $${paramIndex}`);
+            params.push(this._serializeKey(selector.end));
+            paramIndex++;
           }
         }
 
-        // --- Cursor Logic ---
-        // We use keyset pagination on the key_path itself
+        // Cursor Logic
         if (cursor) {
           const cursorKey = JSON.parse(cursor);
           if (reverse) {
-            whereClauses.push(
-              this.sql`key_path::text < ${this._serializeKey(cursorKey)}`,
-            );
+            whereClauses.push(`key_path::text < $${paramIndex}`);
           } else {
-            whereClauses.push(
-              this.sql`key_path::text > ${this._serializeKey(cursorKey)}`,
-            );
+            whereClauses.push(`key_path::text > $${paramIndex}`);
           }
+          params.push(this._serializeKey(cursorKey));
+          paramIndex++;
         }
 
-        // Build WHERE clause by joining conditions
-        let whereClause = whereClauses[0];
-        for (let i = 1; i < whereClauses.length; i++) {
-          whereClause = this.sql`${whereClause} AND ${whereClauses[i]}`;
-        }
-        query = this.sql`${query} WHERE ${whereClause}`;
+        query += ` WHERE ${whereClauses.join(" AND ")}`;
+        query += ` ORDER BY key_path::text ${reverse ? "DESC" : "ASC"}`;
+        query += ` LIMIT $${paramIndex}`;
+        params.push(limit);
 
-        // --- Order and Limit ---
-        query = this.sql`${query} ORDER BY key_path::text ${
-          reverse ? this.sql`DESC` : this.sql`ASC`
-        }`;
-        query = this.sql`${query} LIMIT ${limit}`;
+        const result = await this.pool.query(query, params);
 
-        const rows = (await query) as unknown as PostgresRow[];
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
           return;
         }
 
-        for (const row of rows) {
-          yield this._rowToEntry(row as PostgresRow);
+        for (const row of result.rows) {
+          yield this._rowToEntry(row as DatabaseRow);
         }
 
         // Update cursor for the next iteration
-        const lastEntry = rows[rows.length - 1];
+        const lastEntry = result.rows[result.rows.length - 1];
         cursor = lastEntry.key_path;
 
-        if (rows.length < limit) {
+        if (result.rows.length < limit) {
           return;
         }
       }
     }.bind(this)();
 
-    // The Deno.KvListIterator requires a 'cursor' property.
-    // We have to wrap the generator to expose it.
     return Object.assign(iterator, {
       get cursor() {
         return cursor ?? "";
@@ -297,7 +336,7 @@ class PostgresKv implements Kv {
   }
 
   atomic(): KvAtomicOperation {
-    return new PostgresAtomicOperation(this.sql);
+    return new PostgresAtomicOperation(this.pool);
   }
 
   // Unsupported operations
@@ -307,22 +346,13 @@ class PostgresKv implements Kv {
     );
   }
 
-  async enqueue(
-    value: unknown,
-    options?: {
-      delay?: number;
-      keysIfUndelivered?: DenoKvKey[];
-      backoffSchedule?: number[];
-    },
-  ): Promise<KvCommitResult> {
+  async enqueue(): Promise<KvCommitResult> {
     throw new Error(
       "The `enqueue` operation is not supported by this PostgreSQL KV wrapper.",
     );
   }
 
-  async listenQueue(
-    handler: (value: unknown) => Promise<void> | void,
-  ): Promise<void> {
+  async listenQueue(): Promise<void> {
     throw new Error(
       "The `listenQueue` operation is not supported by this PostgreSQL KV wrapper.",
     );
@@ -339,24 +369,23 @@ class PostgresKv implements Kv {
   }
 
   async close(): Promise<void> {
-    await this.sql.end();
+    await this.pool.end();
   }
 }
 
 /**
- * Handles atomic transactions.
+ * Handles atomic transactions using pg.
  */
 class PostgresAtomicOperation implements KvAtomicOperation {
-  private sql: postgres.Sql;
-  private operations: Array<(tx: postgres.Sql) => Promise<unknown>> = [];
+  private pool: Pool;
+  private operations: Array<(client: PoolClient) => Promise<unknown>> = [];
   private checks: Array<{ key: DenoKvKey; versionstamp: string | null }> = [];
 
-  constructor(sql: postgres.Sql) {
-    this.sql = sql;
+  constructor(pool: Pool) {
+    this.pool = pool;
   }
 
   private _serializeKey(key: DenoKvKey): string {
-    // Filter out symbols as PostgreSQL cannot store them
     const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
     return JSON.stringify(filteredKey);
   }
@@ -394,20 +423,23 @@ class PostgresAtomicOperation implements KvAtomicOperation {
 
   sum(key: DenoKvKey, n: bigint): this {
     const serializedKey = this._serializeKey(key);
-    this.operations.push(async (tx) => {
-      // Note: This operation is complex and requires careful handling of types.
-      // We use JSONB operators to perform the addition.
-      await tx`
-        INSERT INTO deno_kv (key_path, value)
-        VALUES (${serializedKey}, jsonb_build_object('value', ${n.toString()}, 'type', 'bigint'))
-        ON CONFLICT (key_path) DO UPDATE
-        SET value = jsonb_set(
-          deno_kv.value,
-          '{value}',
-          ( (deno_kv.value->>'value')::bigint + ${n.toString()} )::text::jsonb
-        )
-        WHERE deno_kv.value->>'type' = 'bigint'
-      `;
+    this.operations.push(async (client) => {
+      await client.query(
+        `INSERT INTO deno_kv (key_path, value)
+         VALUES ($1, $2)
+         ON CONFLICT (key_path) DO UPDATE SET
+           value = jsonb_set(
+             deno_kv.value,
+             '{value}',
+             (((deno_kv.value->>'value')::bigint + $3)::text)::jsonb
+           )
+         WHERE deno_kv.value->>'type' = 'bigint'`,
+        [
+          serializedKey,
+          JSON.stringify({ value: n.toString(), type: "bigint" }),
+          n.toString(),
+        ],
+      );
     });
     return this;
   }
@@ -415,122 +447,176 @@ class PostgresAtomicOperation implements KvAtomicOperation {
   set(key: DenoKvKey, value: unknown, options?: { expireIn?: number }): this {
     const serializedKey = this._serializeKey(key);
     const serializedValue = JSON.stringify(value);
-    const expiresAt = options?.expireIn ? new Date(Date.now() + options.expireIn) : null;
+    const expiresAt = options?.expireIn
+      ? new Date(Date.now() + options.expireIn).toISOString()
+      : null;
 
-    this.operations.push(async (tx) => {
-      await tx`
-          INSERT INTO deno_kv (key_path, value, expires_at)
-          VALUES (${serializedKey}, ${serializedValue}, ${expiresAt})
-          ON CONFLICT (key_path) DO UPDATE
-          SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at
-        `;
+    this.operations.push(async (client) => {
+      await client.query(
+        `INSERT INTO deno_kv (key_path, value, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (key_path) DO UPDATE SET
+           value = EXCLUDED.value,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = NOW()`,
+        [serializedKey, serializedValue, expiresAt],
+      );
     });
     return this;
   }
 
   delete(key: DenoKvKey): this {
     const serializedKey = this._serializeKey(key);
-    this.operations.push(async (tx) => {
-      await tx`DELETE FROM deno_kv WHERE key_path = ${serializedKey}`;
+    this.operations.push(async (client) => {
+      await client.query(`DELETE FROM deno_kv WHERE key_path = $1`, [
+        serializedKey,
+      ]);
     });
     return this;
   }
 
   async commit(): Promise<KvCommitResult | null> {
+    const client = await this.pool.connect();
+
     try {
-      const result = await this.sql.begin(async (tx) => {
-        // 1. Perform checks
-        for (const check of this.checks) {
-          const rows = await tx<{ versionstamp: number }[]>`
-            SELECT versionstamp FROM deno_kv
-            WHERE key_path = ${this._serializeKey(check.key)}
-              AND (expires_at IS NULL OR expires_at > NOW())
-          `;
-          const currentVersion = rows.length > 0 ? rows[0].versionstamp.toString() : null;
-          if (currentVersion !== check.versionstamp) {
-            throw new Error("Atomic check failed");
-          }
-        }
+      await client.query("BEGIN");
 
-        // 2. Execute operations
-        for (const op of this.operations) {
-          await op(tx);
-        }
+      // Perform checks
+      for (const check of this.checks) {
+        const result = await client.query(
+          `SELECT versionstamp::text as versionstamp FROM deno_kv
+           WHERE key_path = $1 AND (expires_at IS NULL OR expires_at > NOW())`,
+          [this._serializeKey(check.key)],
+        );
 
-        // 3. Get the transaction ID as the commit versionstamp
-        const commitVersionRows = await tx<
-          { versionstamp: number }[]
-        >`SELECT txid_current() as versionstamp`;
-        return commitVersionRows[0];
-      });
+        const currentVersion =
+          result.rows.length > 0 ? result.rows[0].versionstamp : null;
+        if (currentVersion !== check.versionstamp) {
+          await client.query("ROLLBACK");
+          return { ok: false };
+        }
+      }
+
+      // Execute operations
+      for (const op of this.operations) {
+        await op(client);
+      }
+
+      // Get transaction ID as versionstamp
+      const result = await client.query(
+        "SELECT txid_current()::text as versionstamp",
+      );
+      await client.query("COMMIT");
 
       return {
         ok: true,
-        versionstamp: result.versionstamp.toString(),
+        versionstamp: result.rows[0].versionstamp,
       };
     } catch (error) {
+      await client.query("ROLLBACK");
       if (error instanceof Error && error.message === "Atomic check failed") {
         return { ok: false };
       }
-      // Re-throw other database errors
+      console.error(
+        "[PG-KV] Atomic operation failed:",
+        (error as Error).message,
+      );
       throw error;
+    } finally {
+      client.release();
     }
   }
 }
 
 /**
- * The main entry point to open a PostgreSQL-backed KV store.
- * @param postgresUri The connection string for your PostgreSQL database.
- * @returns A promise that resolves to a Kv instance.
+ * Zero configuration entry point for Deno Deploy.
+ * Uses standard pg library with automatic environment variable detection.
  */
-export async function openKvPostgres(postgresUri: string): Promise<Kv> {
-  const sql = postgres(postgresUri, {
-    // Recommended settings for serverless environments
-    max: 1,
-    idle_timeout: 5,
-    connect_timeout: 10,
+export async function openKvPostgres(): Promise<Kv> {
+  const isDeployEnv = isDenoDeploy();
+
+  console.log(
+    `[PG-KV] Creating PostgreSQL connection pool ${isDeployEnv ? "[Deploy - Zero Config]" : "[Local]"}`,
+  );
+
+  // Zero configuration - pg will automatically use environment variables
+  // PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PGSSLMODE
+  const pool = new Pool({
+    // Let pg handle all configuration via environment variables
+    // No manual configuration needed for Deno Deploy
+    max: 1, // Single connection for serverless
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 30000,
   });
 
-  // Ensure the schema is created on first connect
-  await setupSchema(sql);
+  try {
+    // Test connection and ensure schema exists
+    console.log("[PG-KV] Testing database connection...");
+    await setupSchema(pool);
+    console.log("[PG-KV] Database connection and schema verified");
+  } catch (error) {
+    console.error(`[PG-KV] Database setup failed: ${(error as Error).message}`);
+    throw error;
+  }
 
-  return new PostgresKv(sql);
+  return new PostgresKv(pool);
 }
 
 /**
- * Initializes the required database schema.
+ * Initializes the required database schema using zero config.
  */
-async function setupSchema(sql: postgres.Sql) {
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS deno_kv (
+async function setupSchema(pool: Pool): Promise<void> {
+  try {
+    // Test connection first
+    await pool.query("SELECT 1");
+
+    // Create table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS deno_kv (
         versionstamp BIGSERIAL PRIMARY KEY,
         key_path JSONB NOT NULL,
         value JSONB NOT NULL,
         expires_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+      )
+    `);
 
-    CREATE UNIQUE INDEX IF NOT EXISTS deno_kv_key_path_idx ON deno_kv (key_path);
-    CREATE INDEX IF NOT EXISTS deno_kv_expires_at_idx ON deno_kv (expires_at) WHERE expires_at IS NOT NULL;
+    // Create indexes
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS deno_kv_key_path_idx ON deno_kv (key_path)
+    `);
 
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_set_updated_at') THEN
-            CREATE OR REPLACE FUNCTION set_updated_at()
-            RETURNS TRIGGER AS $func$
-            BEGIN
-                NEW.updated_at = NOW();
-                RETURN NEW;
-            END;
-            $func$ LANGUAGE plpgsql;
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS deno_kv_expires_at_idx ON deno_kv (expires_at)
+      WHERE expires_at IS NOT NULL
+    `);
 
-            CREATE TRIGGER trg_set_updated_at
-            BEFORE UPDATE ON deno_kv
-            FOR EACH ROW
-            EXECUTE FUNCTION set_updated_at();
-        END IF;
-    END
-    $$;
-  `);
+    // Create trigger function and trigger
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION set_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trg_set_updated_at ON deno_kv
+    `);
+
+    await pool.query(`
+      CREATE TRIGGER trg_set_updated_at
+      BEFORE UPDATE ON deno_kv
+      FOR EACH ROW
+      EXECUTE FUNCTION set_updated_at()
+    `);
+
+    console.log("[PG-KV] Database schema setup completed successfully");
+  } catch (error) {
+    console.error("[PG-KV] Schema setup error:", (error as Error).message);
+    throw error;
+  }
 }
