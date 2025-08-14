@@ -114,25 +114,80 @@ class PostgresKv implements Kv {
    * Filters out symbols since PostgreSQL cannot store them.
    */
   private _serializeKey(key: DenoKvKey): string {
-    // Filter out symbols as PostgreSQL cannot store them
-    const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
-    return JSON.stringify(filteredKey);
+    try {
+      // Filter out symbols as PostgreSQL cannot store them
+      const filteredKey = key.filter(
+        (part) => typeof part !== "symbol",
+      ) as KvKey;
+
+      // Ensure we have an array
+      if (!Array.isArray(key)) {
+        console.warn("[PG-KV] Key is not an array:", key);
+        return JSON.stringify([key]);
+      }
+
+      const result = JSON.stringify(filteredKey);
+      return result;
+    } catch (error) {
+      console.error("[PG-KV] Error serializing key:", {
+        key,
+        error: (error as Error).message,
+      });
+      // Fallback - treat as single key
+      return JSON.stringify([String(key)]);
+    }
   }
 
   /**
    * Helper to map a database row to a KvEntry.
    */
   private _rowToEntry<T>(row: DatabaseRow): KvEntry<T> {
-    return {
-      key: JSON.parse(row.key_path),
-      value: JSON.parse(row.value) as T,
-      versionstamp: row.versionstamp,
-    };
+    try {
+      let parsedKey;
+      try {
+        parsedKey = JSON.parse(row.key_path);
+      } catch (keyError) {
+        console.error("[PG-KV] Invalid key JSON, attempting fallback:", {
+          keyPath: row.key_path,
+          error: (keyError as Error).message,
+        });
+        // Fallback: treat as comma-separated string or single key
+        if (typeof row.key_path === "string" && row.key_path.includes(",")) {
+          parsedKey = row.key_path.split(",");
+        } else {
+          parsedKey = [row.key_path];
+        }
+      }
+
+      let parsedValue;
+      try {
+        parsedValue = JSON.parse(row.value);
+      } catch (valueError) {
+        console.error("[PG-KV] Invalid value JSON:", {
+          value: row.value,
+          error: (valueError as Error).message,
+        });
+        parsedValue = row.value; // Use raw value as fallback
+      }
+
+      return {
+        key: parsedKey,
+        value: parsedValue as T,
+        versionstamp: row.versionstamp,
+      };
+    } catch (error) {
+      console.error("[PG-KV] Error in _rowToEntry:", {
+        row,
+        error: (error as Error).message,
+      });
+      throw error;
+    }
   }
 
   async get<T = unknown>(key: DenoKvKey): Promise<KvEntry<T> | null> {
     try {
       const serializedKey = this._serializeKey(key);
+
       const result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
@@ -147,10 +202,11 @@ class PostgresKv implements Kv {
 
       return this._rowToEntry<T>(result.rows[0] as DatabaseRow);
     } catch (error) {
-      console.error(
-        "[PG-KV] Error in get operation:",
-        (error as Error).message,
-      );
+      console.error("[PG-KV] Error in get operation:", {
+        key,
+        error: (error as Error).message,
+        stack: (error as Error).stack?.split("\n").slice(0, 3).join("\n"),
+      });
       throw error;
     }
   }

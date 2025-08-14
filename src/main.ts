@@ -74,12 +74,19 @@ import { DenoKvExtension } from "./extensions/deno-kv.ts";
 // Import session middleware
 import type { SessionMiddleware } from "./middleware/session.ts";
 
+// Bootstrap state tracking
+let bootstrapInProgress = false;
+let bootstrapCompleted = false;
+let serverInstance: AbracadabraServer | null = null;
+
 class AbracadabraServer {
   private app: Hono;
   private kv!: Deno.Kv;
   private config!: ServerConfig;
   private hocuspocus!: Hocuspocus;
   private logger!: ReturnType<typeof getLogger>;
+  private isStarted = false;
+  private isStarting = false;
 
   // Services
   private configService!: ConfigService;
@@ -99,6 +106,22 @@ class AbracadabraServer {
    * Initialize and start the Abracadabra server
    */
   async start(): Promise<void> {
+    // Prevent multiple starts
+    if (this.isStarted) {
+      console.warn(
+        "[Server] Server already started, ignoring duplicate start request",
+      );
+      return;
+    }
+
+    if (this.isStarting) {
+      console.warn(
+        "[Server] Server start already in progress, ignoring duplicate start request",
+      );
+      return;
+    }
+
+    this.isStarting = true;
     const isDeployEnv = isDenoDeploy();
     const startTime = Date.now();
 
@@ -163,9 +186,12 @@ class AbracadabraServer {
       const totalStartTime = Date.now() - startTime;
       this.logger.info("🚀 Abracadabra Server started successfully!", {
         totalStartTime: `${totalStartTime}ms`,
-        isDeployEnv,
+        environment: envInfo.platform,
         port: this.config?.server?.port || 8000,
       });
+
+      this.isStarted = true;
+      this.isStarting = false;
     } catch (error) {
       const totalStartTime = Date.now() - startTime;
       this.logger.error("Failed to start Abracadabra Server", {
@@ -192,6 +218,7 @@ class AbracadabraServer {
       }
 
       // Re-throw the original error
+      this.isStarting = false;
       throw error;
     }
   }
@@ -725,6 +752,22 @@ class AbracadabraServer {
  * Enhanced bootstrap function with Deno Deploy safeguards
  */
 async function bootstrap(): Promise<void> {
+  // Prevent multiple bootstrap attempts
+  if (bootstrapInProgress) {
+    console.warn(
+      "[Bootstrap] Bootstrap already in progress, ignoring duplicate call",
+    );
+    return;
+  }
+
+  if (bootstrapCompleted) {
+    console.warn(
+      "[Bootstrap] Bootstrap already completed, ignoring duplicate call",
+    );
+    return;
+  }
+
+  bootstrapInProgress = true;
   const envInfo = getEnvironmentInfo();
   const isDeployEnv = envInfo.isDenoDeploy;
   const deployId = getDeploymentId();
@@ -791,8 +834,11 @@ async function bootstrap(): Promise<void> {
       mainLogger.info("Set NODE_ENV=production for Deno Deploy");
     }
 
-    // Create and start server with timeout protection
-    const server = new AbracadabraServer();
+    // Create and start server with timeout protection (singleton)
+    if (!serverInstance) {
+      serverInstance = new AbracadabraServer();
+    }
+    const server = serverInstance;
 
     if (envInfo.isDenoDeploy) {
       // Add startup timeout for Deno Deploy
@@ -814,6 +860,9 @@ async function bootstrap(): Promise<void> {
       environment: envInfo.platform,
       deployId,
     });
+
+    bootstrapCompleted = true;
+    bootstrapInProgress = false;
   } catch (error) {
     const startupTime = Date.now() - startTime;
     const errorDetails = {
@@ -851,6 +900,7 @@ async function bootstrap(): Promise<void> {
       );
     }
 
+    bootstrapInProgress = false;
     throw error; // Re-throw to let Deno Deploy handle the failure
   }
 }

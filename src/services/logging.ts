@@ -349,6 +349,11 @@ export class LoggingService {
             level: logtapeLevel,
             sinks: ["console"],
           },
+          {
+            category: ["logtape", "meta"],
+            level: parseLogLevel("error"),
+            sinks: ["console"],
+          },
         ],
       });
     } else {
@@ -386,6 +391,13 @@ export class LoggingService {
           },
         ],
       };
+
+      // Add meta logger configuration to suppress warnings
+      config.loggers.push({
+        category: ["logtape", "meta"],
+        level: parseLogLevel("error"),
+        sinks: ["console"],
+      });
 
       try {
         await configure(config);
