@@ -661,14 +661,36 @@ async function migrateLegacyData(pool: Pool): Promise<void> {
   try {
     console.log("[PG-KV] Checking for legacy data to migrate...");
 
-    // First, check if there's any data in the table
+    // Check if migration has already been completed
+    try {
+      const migrationCheck = await pool.query(`
+        SELECT value FROM deno_kv
+        WHERE key_path = '["_migration","completed"]'::jsonb
+      `);
+
+      if (migrationCheck.rows.length > 0) {
+        console.log("[PG-KV] Migration already completed, skipping");
+        return;
+      }
+    } catch {
+      // If table doesn't exist or has issues, continue with migration
+    }
+
+    // Check if there's any data in the table
     const totalDataCheck = await pool.query(
       `SELECT COUNT(*) as count FROM deno_kv`,
     );
     const totalCount = parseInt(totalDataCheck.rows[0].count);
 
     if (totalCount === 0) {
-      console.log("[PG-KV] No data found in table, migration skipped");
+      console.log(
+        "[PG-KV] No data found in table, marking migration as complete",
+      );
+      await pool.query(`
+        INSERT INTO deno_kv (key_path, value, created_at, updated_at)
+        VALUES ('["_migration","completed"]'::jsonb, 'true'::jsonb, NOW(), NOW())
+        ON CONFLICT (key_path) DO NOTHING
+      `);
       return;
     }
 
@@ -681,7 +703,8 @@ async function migrateLegacyData(pool: Pool): Promise<void> {
     try {
       const problematicDataCheck = await pool.query(`
         SELECT COUNT(*) as count FROM deno_kv
-        WHERE NOT (
+        WHERE key_path != '["_migration","completed"]'::jsonb
+        AND NOT (
           (key_path::text ~ '^\\[.*\\]$' OR key_path::text ~ '^\\{.*\\}$') AND
           (value::text ~ '^\\[.*\\]$' OR value::text ~ '^\\{.*\\}$' OR value::text ~ '^".*"$' OR value::text ~ '^[0-9]+(\\.[0-9]+)?$' OR value::text IN ('true', 'false', 'null'))
         )
@@ -693,20 +716,36 @@ async function migrateLegacyData(pool: Pool): Promise<void> {
     }
 
     if (problematicCount === 0) {
-      console.log("[PG-KV] No problematic data found, migration skipped");
+      console.log(
+        "[PG-KV] No problematic data found, marking migration as complete",
+      );
+      await pool.query(`
+        INSERT INTO deno_kv (key_path, value, created_at, updated_at)
+        VALUES ('["_migration","completed"]'::jsonb, 'true'::jsonb, NOW(), NOW())
+        ON CONFLICT (key_path) DO NOTHING
+      `);
       return;
     }
 
     console.log(
-      `[PG-KV] Found ${problematicCount} records that may need migration...`,
+      `[PG-KV] Found ${problematicCount} records that need migration...`,
     );
 
-    // Drop and recreate table with proper structure to handle existing bad data
-    console.log("[PG-KV] Backing up existing data...");
+    // Create single backup table (only if it doesn't exist)
+    console.log("[PG-KV] Creating backup table...");
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS deno_kv_backup_${Date.now()} AS
-      SELECT * FROM deno_kv
+      CREATE TABLE IF NOT EXISTS deno_kv_backup AS
+      SELECT * FROM deno_kv WHERE false
     `);
+
+    // Insert backup data (only if backup is empty)
+    const backupCheck = await pool.query(
+      `SELECT COUNT(*) as count FROM deno_kv_backup`,
+    );
+    if (parseInt(backupCheck.rows[0].count) === 0) {
+      await pool.query(`INSERT INTO deno_kv_backup SELECT * FROM deno_kv`);
+      console.log("[PG-KV] Data backed up to deno_kv_backup table");
+    }
 
     // Create a temporary table with text columns
     await pool.query(`
@@ -762,8 +801,15 @@ async function migrateLegacyData(pool: Pool): Promise<void> {
       FROM deno_kv_temp
     `);
 
+    // Mark migration as completed
+    await pool.query(`
+      INSERT INTO deno_kv (key_path, value, created_at, updated_at)
+      VALUES ('["_migration","completed"]'::jsonb, 'true'::jsonb, NOW(), NOW())
+      ON CONFLICT (key_path) DO NOTHING
+    `);
+
     const migratedCount = await pool.query(
-      `SELECT COUNT(*) as count FROM deno_kv`,
+      `SELECT COUNT(*) as count FROM deno_kv WHERE key_path != '["_migration","completed"]'::jsonb`,
     );
     console.log(
       `[PG-KV] Successfully migrated ${migratedCount.rows[0].count} records`,
