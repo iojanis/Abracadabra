@@ -113,7 +113,7 @@ class PostgresKv implements Kv {
    * Serializes a KvKey to a JSON string for storing in PostgreSQL.
    * Filters out symbols since PostgreSQL cannot store them.
    */
-  private _serializeKey(key: DenoKvKey): string {
+  private _serializeKey(key: DenoKvKey): KvKey {
     try {
       // Filter out symbols as PostgreSQL cannot store them
       const filteredKey = key.filter(
@@ -123,17 +123,17 @@ class PostgresKv implements Kv {
       // Ensure we have an array
       if (!Array.isArray(key)) {
         console.warn("[PG-KV] Key is not an array:", key);
-        return JSON.stringify([key]);
+        return [key as unknown as KvKeyPart];
       }
 
-      return JSON.stringify(filteredKey);
+      return filteredKey;
     } catch (error) {
       console.error("[PG-KV] Error serializing key:", {
         key,
         error: (error as Error).message,
       });
       // Fallback - treat as single key
-      return JSON.stringify([String(key)]);
+      return [String(key)];
     }
   }
 
@@ -144,24 +144,39 @@ class PostgresKv implements Kv {
   private _rowToEntry<T>(row: DatabaseRow): KvEntry<T> {
     try {
       let parsedKey;
-      try {
-        // Try to parse as JSON first (new format)
-        parsedKey = JSON.parse(row.key_path);
-      } catch (keyError) {
-        // Fallback for legacy comma-separated format
-        if (typeof row.key_path === "string" && row.key_path.includes(",")) {
-          parsedKey = row.key_path.split(",");
-        } else {
-          parsedKey = [row.key_path];
+
+      // Check if key_path is already a parsed object/array (JSONB column)
+      if (typeof row.key_path === "object" && row.key_path !== null) {
+        parsedKey = row.key_path;
+      } else if (typeof row.key_path === "string") {
+        try {
+          // Try to parse as JSON first (legacy format)
+          parsedKey = JSON.parse(row.key_path);
+        } catch (_keyError) {
+          // Fallback for legacy comma-separated format
+          if (row.key_path.includes(",")) {
+            parsedKey = row.key_path.split(",");
+          } else {
+            parsedKey = [row.key_path];
+          }
         }
+      } else {
+        parsedKey = [row.key_path];
       }
 
       let parsedValue;
-      try {
-        // Try to parse as JSON first (new format)
-        parsedValue = JSON.parse(row.value);
-      } catch (valueError) {
-        // Fallback: use raw value for legacy non-JSON values
+
+      // Check if value is already a parsed object (JSONB column)
+      if (typeof row.value === "string") {
+        try {
+          // Legacy string format - try to parse as JSON
+          parsedValue = JSON.parse(row.value);
+        } catch (_valueError) {
+          // Fallback: use raw value for legacy non-JSON values
+          parsedValue = row.value;
+        }
+      } else {
+        // Value is already parsed from JSONB column
         parsedValue = row.value;
       }
 
@@ -183,7 +198,7 @@ class PostgresKv implements Kv {
     try {
       const serializedKey = this._serializeKey(key);
 
-      // Try new JSON format first, then fallback to legacy comma format
+      // Try new JSONB format first, then fallback to legacy comma format
       let result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
@@ -192,7 +207,7 @@ class PostgresKv implements Kv {
         [serializedKey],
       );
 
-      // If not found with JSON format, try legacy comma-separated format
+      // If not found with JSONB format, try legacy comma-separated format
       if (result.rows.length === 0) {
         const legacyKey = key.join(",");
         result = await this.pool.query(
@@ -229,23 +244,30 @@ class PostgresKv implements Kv {
       const serializedKeys = keys.map((key) => this._serializeKey(key));
       const legacyKeys = keys.map((key) => key.join(","));
       const allKeys = [...serializedKeys, ...legacyKeys];
-      const placeholders = allKeys.map((_, i) => `$${i + 1}`).join(", ");
 
       const result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
-         WHERE key_path IN (${placeholders})
+         WHERE key_path = ANY($1)
          AND (expires_at IS NULL OR expires_at > NOW())`,
-        allKeys,
+        [allKeys],
       );
 
       // Create a map for quick lookups to maintain order
       const entryMap = new Map<string, KvEntry<T[number]>>();
       for (const row of result.rows) {
-        entryMap.set(row.key_path, this._rowToEntry(row as DatabaseRow));
+        const keyString =
+          typeof row.key_path === "object"
+            ? JSON.stringify(row.key_path)
+            : row.key_path;
+        entryMap.set(keyString, this._rowToEntry(row as DatabaseRow));
       }
 
-      return keys.map((key) => entryMap.get(this._serializeKey(key)) || null);
+      return keys.map((key) => {
+        const keyString = JSON.stringify(this._serializeKey(key));
+        const legacyKeyString = key.join(",");
+        return entryMap.get(keyString) || entryMap.get(legacyKeyString) || null;
+      });
     } catch (error) {
       console.error(
         "[PG-KV] Error in getMany operation:",
@@ -262,7 +284,7 @@ class PostgresKv implements Kv {
   ): Promise<KvCommitResult> {
     try {
       const serializedKey = this._serializeKey(key);
-      const serializedValue = JSON.stringify(value);
+      const serializedValue = value; // Store value directly for JSONB column
       const expiresAt = options?.expireIn
         ? new Date(Date.now() + options.expireIn).toISOString()
         : null;
@@ -323,24 +345,24 @@ class PostgresKv implements Kv {
         const whereClauses: string[] = [
           `(expires_at IS NULL OR expires_at > NOW())`,
         ];
-        const params: any[] = [];
+        const params: unknown[] = [];
         let paramIndex = 1;
 
         // Selector Logic
         if ("prefix" in selector) {
-          const prefixStr = JSON.stringify(selector.prefix).slice(0, -1); // Remove trailing ]
-          whereClauses.push(`key_path::text LIKE $${paramIndex}`);
-          params.push(prefixStr + ",%");
+          // Use JSONB containment operator for prefix matching
+          whereClauses.push(`key_path @> $${paramIndex}`);
+          params.push(JSON.stringify(selector.prefix));
           paramIndex++;
         } else {
           // Range selector
           if (selector.start) {
-            whereClauses.push(`key_path::text >= $${paramIndex}`);
+            whereClauses.push(`key_path >= $${paramIndex}`);
             params.push(this._serializeKey(selector.start));
             paramIndex++;
           }
           if (selector.end) {
-            whereClauses.push(`key_path::text < $${paramIndex}`);
+            whereClauses.push(`key_path < $${paramIndex}`);
             params.push(this._serializeKey(selector.end));
             paramIndex++;
           }
@@ -348,18 +370,28 @@ class PostgresKv implements Kv {
 
         // Cursor Logic
         if (cursor) {
-          const cursorKey = JSON.parse(cursor);
-          if (reverse) {
-            whereClauses.push(`key_path::text < $${paramIndex}`);
-          } else {
-            whereClauses.push(`key_path::text > $${paramIndex}`);
+          let cursorKey;
+          try {
+            cursorKey =
+              typeof cursor === "string" ? JSON.parse(cursor) : cursor;
+          } catch {
+            cursorKey = cursor;
           }
-          params.push(this._serializeKey(cursorKey));
+          if (reverse) {
+            whereClauses.push(`key_path < $${paramIndex}`);
+          } else {
+            whereClauses.push(`key_path > $${paramIndex}`);
+          }
+          params.push(
+            Array.isArray(cursorKey)
+              ? cursorKey
+              : this._serializeKey(cursorKey),
+          );
           paramIndex++;
         }
 
         query += ` WHERE ${whereClauses.join(" AND ")}`;
-        query += ` ORDER BY key_path::text ${reverse ? "DESC" : "ASC"}`;
+        query += ` ORDER BY key_path ${reverse ? "DESC" : "ASC"}`;
         query += ` LIMIT $${paramIndex}`;
         params.push(limit);
 
@@ -375,7 +407,10 @@ class PostgresKv implements Kv {
 
         // Update cursor for the next iteration
         const lastEntry = result.rows[result.rows.length - 1];
-        cursor = lastEntry.key_path;
+        cursor =
+          typeof lastEntry.key_path === "object"
+            ? JSON.stringify(lastEntry.key_path)
+            : lastEntry.key_path;
 
         if (result.rows.length < limit) {
           return;
@@ -401,13 +436,13 @@ class PostgresKv implements Kv {
     );
   }
 
-  async enqueue(): Promise<KvCommitResult> {
+  enqueue(): Promise<KvCommitResult> {
     throw new Error(
       "The `enqueue` operation is not supported by this PostgreSQL KV wrapper.",
     );
   }
 
-  async listenQueue(): Promise<void> {
+  listenQueue(): Promise<void> {
     throw new Error(
       "The `listenQueue` operation is not supported by this PostgreSQL KV wrapper.",
     );
@@ -440,9 +475,9 @@ class PostgresAtomicOperation implements KvAtomicOperation {
     this.pool = pool;
   }
 
-  private _serializeKey(key: DenoKvKey): string {
+  private _serializeKey(key: DenoKvKey): KvKey {
     const filteredKey = key.filter((part) => typeof part !== "symbol") as KvKey;
-    return JSON.stringify(filteredKey);
+    return filteredKey;
   }
 
   check(
@@ -489,11 +524,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
              (((deno_kv.value->>'value')::bigint + $3)::text)::jsonb
            )
          WHERE deno_kv.value->>'type' = 'bigint'`,
-        [
-          serializedKey,
-          JSON.stringify({ value: n.toString(), type: "bigint" }),
-          n.toString(),
-        ],
+        [serializedKey, { value: n.toString(), type: "bigint" }, n.toString()],
       );
     });
     return this;
@@ -501,7 +532,7 @@ class PostgresAtomicOperation implements KvAtomicOperation {
 
   set(key: DenoKvKey, value: unknown, options?: { expireIn?: number }): this {
     const serializedKey = this._serializeKey(key);
-    const serializedValue = JSON.stringify(value);
+    const serializedValue = value; // Store value directly for JSONB column
     const expiresAt = options?.expireIn
       ? new Date(Date.now() + options.expireIn).toISOString()
       : null;
@@ -618,6 +649,69 @@ export async function openKvPostgres(): Promise<Kv> {
 }
 
 /**
+ * Migrates legacy data from comma-separated keys and JSON strings to proper JSONB format.
+ */
+async function migrateLegacyData(pool: Pool): Promise<void> {
+  try {
+    console.log("[PG-KV] Checking for legacy data to migrate...");
+
+    // First, check if there's any data that needs migration
+    const legacyDataCheck = await pool.query(`
+      SELECT COUNT(*) as count FROM deno_kv
+      WHERE (key_path::text LIKE '%,%' AND key_path::text NOT LIKE '[%]%')
+         OR (value::text LIKE '"%"' AND value::text NOT LIKE '{%}%' AND value::text NOT LIKE '[%]%')
+    `);
+
+    const legacyCount = parseInt(legacyDataCheck.rows[0].count);
+    if (legacyCount === 0) {
+      console.log("[PG-KV] No legacy data found, migration skipped");
+      return;
+    }
+
+    console.log(
+      `[PG-KV] Found ${legacyCount} legacy records, starting migration...`,
+    );
+
+    // Migrate comma-separated keys to JSON arrays
+    await pool.query(`
+      UPDATE deno_kv
+      SET key_path = ('["' || replace(key_path::text, ',', '","') || '"]')::jsonb
+      WHERE key_path::text LIKE '%,%'
+        AND key_path::text NOT LIKE '[%]%'
+        AND key_path::text !~ '^[{[]'
+    `);
+
+    // Migrate JSON string values to proper JSONB (for simple string values)
+    await pool.query(`
+      UPDATE deno_kv
+      SET value = ('"' || value::text || '"')::jsonb
+      WHERE value::text NOT LIKE '{%}%'
+        AND value::text NOT LIKE '[%]%'
+        AND value::text NOT LIKE '"%"'
+        AND value::text !~ '^[{[]'
+        AND length(value::text) > 0
+    `);
+
+    // Handle already quoted string values that are double-encoded
+    await pool.query(`
+      UPDATE deno_kv
+      SET value = value::text::jsonb
+      WHERE value::text LIKE '"%"'
+        AND value::text NOT LIKE '{%}%'
+        AND value::text NOT LIKE '[%]%'
+    `);
+
+    console.log("[PG-KV] Legacy data migration completed successfully");
+  } catch (error) {
+    console.warn(
+      "[PG-KV] Legacy data migration failed, continuing with existing data:",
+      (error as Error).message,
+    );
+    // Don't throw - we want the server to continue even if migration fails
+  }
+}
+
+/**
  * Initializes the required database schema using zero config.
  */
 async function setupSchema(pool: Pool): Promise<void> {
@@ -668,6 +762,9 @@ async function setupSchema(pool: Pool): Promise<void> {
       FOR EACH ROW
       EXECUTE FUNCTION set_updated_at()
     `);
+
+    // Migrate legacy data if it exists
+    await migrateLegacyData(pool);
 
     console.log("[PG-KV] Database schema setup completed successfully");
   } catch (error) {
