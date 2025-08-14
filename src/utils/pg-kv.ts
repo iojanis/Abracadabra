@@ -126,8 +126,7 @@ class PostgresKv implements Kv {
         return JSON.stringify([key]);
       }
 
-      const result = JSON.stringify(filteredKey);
-      return result;
+      return JSON.stringify(filteredKey);
     } catch (error) {
       console.error("[PG-KV] Error serializing key:", {
         key,
@@ -140,18 +139,16 @@ class PostgresKv implements Kv {
 
   /**
    * Helper to map a database row to a KvEntry.
+   * Handles both new JSON format and legacy comma-separated format.
    */
   private _rowToEntry<T>(row: DatabaseRow): KvEntry<T> {
     try {
       let parsedKey;
       try {
+        // Try to parse as JSON first (new format)
         parsedKey = JSON.parse(row.key_path);
       } catch (keyError) {
-        console.error("[PG-KV] Invalid key JSON, attempting fallback:", {
-          keyPath: row.key_path,
-          error: (keyError as Error).message,
-        });
-        // Fallback: treat as comma-separated string or single key
+        // Fallback for legacy comma-separated format
         if (typeof row.key_path === "string" && row.key_path.includes(",")) {
           parsedKey = row.key_path.split(",");
         } else {
@@ -161,13 +158,11 @@ class PostgresKv implements Kv {
 
       let parsedValue;
       try {
+        // Try to parse as JSON first (new format)
         parsedValue = JSON.parse(row.value);
       } catch (valueError) {
-        console.error("[PG-KV] Invalid value JSON:", {
-          value: row.value,
-          error: (valueError as Error).message,
-        });
-        parsedValue = row.value; // Use raw value as fallback
+        // Fallback: use raw value for legacy non-JSON values
+        parsedValue = row.value;
       }
 
       return {
@@ -188,13 +183,26 @@ class PostgresKv implements Kv {
     try {
       const serializedKey = this._serializeKey(key);
 
-      const result = await this.pool.query(
+      // Try new JSON format first, then fallback to legacy comma format
+      let result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
          WHERE key_path = $1
          AND (expires_at IS NULL OR expires_at > NOW())`,
         [serializedKey],
       );
+
+      // If not found with JSON format, try legacy comma-separated format
+      if (result.rows.length === 0) {
+        const legacyKey = key.join(",");
+        result = await this.pool.query(
+          `SELECT key_path, value, versionstamp::text as versionstamp
+           FROM deno_kv
+           WHERE key_path = $1
+           AND (expires_at IS NULL OR expires_at > NOW())`,
+          [legacyKey],
+        );
+      }
 
       if (result.rows.length === 0) {
         return null;
@@ -205,7 +213,6 @@ class PostgresKv implements Kv {
       console.error("[PG-KV] Error in get operation:", {
         key,
         error: (error as Error).message,
-        stack: (error as Error).stack?.split("\n").slice(0, 3).join("\n"),
       });
       throw error;
     }
@@ -220,14 +227,16 @@ class PostgresKv implements Kv {
 
     try {
       const serializedKeys = keys.map((key) => this._serializeKey(key));
-      const placeholders = serializedKeys.map((_, i) => `$${i + 1}`).join(", ");
+      const legacyKeys = keys.map((key) => key.join(","));
+      const allKeys = [...serializedKeys, ...legacyKeys];
+      const placeholders = allKeys.map((_, i) => `$${i + 1}`).join(", ");
 
       const result = await this.pool.query(
         `SELECT key_path, value, versionstamp::text as versionstamp
          FROM deno_kv
          WHERE key_path IN (${placeholders})
          AND (expires_at IS NULL OR expires_at > NOW())`,
-        serializedKeys,
+        allKeys,
       );
 
       // Create a map for quick lookups to maintain order

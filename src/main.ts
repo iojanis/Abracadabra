@@ -123,6 +123,7 @@ class AbracadabraServer {
 
     this.isStarting = true;
     const isDeployEnv = isDenoDeploy();
+    const envInfo = getEnvironmentInfo();
     const startTime = Date.now();
 
     try {
