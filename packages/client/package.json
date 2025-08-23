@@ -20,9 +20,9 @@
     "dev": "vite"
   },
   "dependencies": {
-    "y-indexeddb": "^10.3.1",
-    "y-webrtc": "^11.0.1",
     "@hocuspocus/provider": "^2.15.2",
+    "y-indexeddb": "^9.0.0-4",
+    "y-webrtc": "^10.3.0",
     "yjs": "^13.6.23"
   },
   "devDependencies": {

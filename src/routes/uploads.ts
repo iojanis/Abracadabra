@@ -375,8 +375,8 @@ export class UploadRoutes {
       }
     });
 
-    // List user's files
-    this.app.get("/", zValidator("query", FileQuerySchema), async (c) => {
+    // Shared handler for listing user's files
+    const listFilesHandler = async (c: any) => {
       try {
         const session = (c as any).get("session");
         const userId = session?.userId;
@@ -420,7 +420,11 @@ export class UploadRoutes {
           500,
         );
       }
-    });
+    };
+
+    // List user's files (handle both with and without trailing slash)
+    this.app.get("/", zValidator("query", FileQuerySchema), listFilesHandler);
+    this.app.get("", zValidator("query", FileQuerySchema), listFilesHandler);
 
     // List files for a document
     this.app.get("/document/*", async (c) => {

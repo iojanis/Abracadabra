@@ -1,0 +1,1 @@
+const kv = await Deno.openKv("./data/kv.db"); const iter = kv.list({ prefix: ["documents", "yjs_state"] }); for await (const entry of iter) { console.log("Key:", entry.key, "Size:", entry.value ? entry.value.length : 0); }; kv.close();

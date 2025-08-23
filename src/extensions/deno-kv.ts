@@ -55,6 +55,20 @@ export class DenoKvExtension implements Extension {
   }
 
   // ============================================================================
+  // Helper Methods
+  // ============================================================================
+
+  /**
+   * Normalize document name by removing doc: prefix if present
+   */
+  private normalizeDocumentName(documentName: string): string {
+    if (documentName.startsWith("doc:")) {
+      return documentName.substring(4);
+    }
+    return documentName;
+  }
+
+  // ============================================================================
   // Extension Lifecycle Methods
   // ============================================================================
 
@@ -63,15 +77,19 @@ export class DenoKvExtension implements Extension {
    */
   async onLoadDocument(payload: onLoadDocumentPayload): Promise<Y.Doc | null> {
     const { documentName } = payload;
+    const normalizedName = this.normalizeDocumentName(documentName);
 
-    getDenoKvLogger().debug("Loading document from KV", { documentName });
+    getDenoKvLogger().debug("Loading document from KV", {
+      documentName,
+      normalizedName,
+    });
 
     try {
-      // Get document state from KV
+      // Get document state from KV using normalized name
       const result = await this.kv.get([
         "documents",
         "yjs_state",
-        documentName,
+        normalizedName,
       ]);
 
       if (!result.value) {
@@ -79,6 +97,7 @@ export class DenoKvExtension implements Extension {
           "Document not found in KV, creating new document",
           {
             documentName,
+            normalizedName,
           },
         );
 
@@ -101,7 +120,7 @@ export class DenoKvExtension implements Extension {
       Y.applyUpdate(ydoc, state);
 
       // Update last accessed time
-      await this.updateDocumentMetadata(documentName, {
+      await this.updateDocumentMetadata(normalizedName, {
         last_accessed_at: Date.now(),
       });
 
@@ -111,14 +130,16 @@ export class DenoKvExtension implements Extension {
 
       getDenoKvLogger().debug("Document loaded successfully from KV", {
         documentName,
+        normalizedName,
         stateSize: state.length,
       });
 
       return ydoc;
     } catch (error) {
       this.metrics.saveErrors++;
-      getDenoKvLogger().error("Failed to store document to KV", {
+      getDenoKvLogger().error("Failed to load document from KV", {
         documentName,
+        normalizedName,
         error: (error as Error).message,
       });
 
@@ -136,8 +157,12 @@ export class DenoKvExtension implements Extension {
    */
   async onStoreDocument(payload: onStoreDocumentPayload): Promise<void> {
     const { documentName, document } = payload;
+    const normalizedName = this.normalizeDocumentName(documentName);
 
-    getDenoKvLogger().debug("Storing document to KV", { documentName });
+    getDenoKvLogger().debug("Storing document to KV", {
+      documentName,
+      normalizedName,
+    });
 
     // Clear existing timeout for this document
     const existingTimeout = this.saveTimeouts.get(documentName);
@@ -147,7 +172,7 @@ export class DenoKvExtension implements Extension {
 
     // Set up debounced save
     const timeout = setTimeout(async () => {
-      await this.saveDocumentToKv(documentName, document);
+      await this.saveDocumentToKv(normalizedName, document);
       this.saveTimeouts.delete(documentName);
     }, this.config.debounceInterval);
 
@@ -159,14 +184,16 @@ export class DenoKvExtension implements Extension {
    */
   async onChange(payload: onChangePayload): Promise<void> {
     const { documentName, document } = payload;
+    const normalizedName = this.normalizeDocumentName(documentName);
 
     getDenoKvLogger().debug("Document changed", {
       documentName,
+      normalizedName,
       size: Y.encodeStateAsUpdate(document).length,
     });
 
     // Update document metadata
-    await this.updateDocumentMetadata(documentName, {
+    await this.updateDocumentMetadata(normalizedName, {
       updated_at: Date.now(),
       size: Y.encodeStateAsUpdate(document).length,
     });
@@ -174,15 +201,17 @@ export class DenoKvExtension implements Extension {
     // Store document directly instead of using onStoreDocument callback
     try {
       const state = Y.encodeStateAsUpdate(document);
-      await this.kv.set(["documents", "yjs_state", documentName], state);
+      await this.kv.set(["documents", "yjs_state", normalizedName], state);
 
       getDenoKvLogger().debug("Document stored via onChange", {
         documentName,
+        normalizedName,
         size: state.length,
       });
     } catch (error) {
       getDenoKvLogger().error("Failed to store document in onChange", {
         documentName,
+        normalizedName,
         error: (error as Error).message,
       });
     }

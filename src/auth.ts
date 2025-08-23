@@ -116,7 +116,8 @@ export class AuthService {
       const defaultSettings: UserSettings = {
         defaultPermissions: "VIEWER",
         emailNotifications: true,
-        maxNestingDepth: (await this.config.get<number>("documents.max_nesting_depth")) ?? 10,
+        maxNestingDepth:
+          (await this.config.get<number>("documents.max_nesting_depth")) ?? 10,
       };
 
       const user: UserObject = {
@@ -214,9 +215,31 @@ export class AuthService {
    */
   async login(data: LoginData): Promise<AuthResult> {
     try {
+      getAuthLogger().info("🔍 DEBUG: AuthService.login called", {
+        identifier: data.identifier,
+        passwordProvided: !!data.password,
+        passwordLength: data.password?.length || 0,
+      });
+
       // Find user by username or email
+      getAuthLogger().info("🔍 DEBUG: Looking up user by identifier", {
+        identifier: data.identifier,
+      });
+
       const user = await this.getUserByIdentifier(data.identifier);
+
+      getAuthLogger().info("🔍 DEBUG: User lookup result", {
+        identifier: data.identifier,
+        userFound: !!user,
+        userId: user?.id,
+        username: user?.username,
+        isActive: user?.isActive,
+        hasHashedPassword: !!user?.hashedPassword,
+      });
       if (!user) {
+        getAuthLogger().error("🔍 DEBUG: User not found", {
+          identifier: data.identifier,
+        });
         // Don't reveal whether username/email exists
         return {
           success: false,
@@ -228,6 +251,11 @@ export class AuthService {
       }
 
       if (!user.isActive) {
+        getAuthLogger().error("🔍 DEBUG: User account is disabled", {
+          identifier: data.identifier,
+          userId: user.id,
+          username: user.username,
+        });
         return {
           success: false,
           error: {
@@ -239,6 +267,11 @@ export class AuthService {
 
       // Verify password
       if (!user.hashedPassword) {
+        getAuthLogger().error("🔍 DEBUG: User has no hashed password", {
+          identifier: data.identifier,
+          userId: user.id,
+          username: user.username,
+        });
         return {
           success: false,
           error: {
@@ -248,8 +281,28 @@ export class AuthService {
         };
       }
 
+      getAuthLogger().info("🔍 DEBUG: Verifying password", {
+        identifier: data.identifier,
+        userId: user.id,
+        username: user.username,
+        hashedPasswordLength: user.hashedPassword.length,
+        providedPasswordLength: data.password.length,
+      });
+
       const isValid = await verify(user.hashedPassword, data.password);
+
+      getAuthLogger().info("🔍 DEBUG: Password verification result", {
+        identifier: data.identifier,
+        userId: user.id,
+        username: user.username,
+        isValid: isValid,
+      });
       if (!isValid) {
+        getAuthLogger().error("🔍 DEBUG: Password verification failed", {
+          userId: user.id,
+          username: user.username,
+          identifier: data.identifier,
+        });
         getAuthLogger().warn("Failed login attempt", {
           userId: user.id,
           username: user.username,
@@ -265,8 +318,26 @@ export class AuthService {
         };
       }
 
+      getAuthLogger().info(
+        "🔍 DEBUG: Password verification succeeded, creating session",
+        {
+          identifier: data.identifier,
+          userId: user.id,
+          username: user.username,
+        },
+      );
+
       // Create session
       const sessionResult = await this.createSession(user.id);
+
+      getAuthLogger().info("🔍 DEBUG: Session creation result", {
+        identifier: data.identifier,
+        userId: user.id,
+        username: user.username,
+        sessionSuccess: sessionResult.success,
+        hasSession: !!sessionResult.session,
+        sessionId: sessionResult.session?.id,
+      });
       if (!sessionResult.success) {
         return sessionResult;
       }
@@ -472,7 +543,8 @@ export class AuthService {
 
   private async createSession(userId: string): Promise<AuthResult> {
     try {
-      const sessionTimeout = (await this.config.get<number>("authentication.session_timeout")) ??
+      const sessionTimeout =
+        (await this.config.get<number>("authentication.session_timeout")) ??
         2592000; // 30 days
 
       const now = new Date();
@@ -612,7 +684,8 @@ export class AuthService {
     if (!/^[a-zA-Z0-9_-]+$/.test(data.username)) {
       return {
         valid: false,
-        error: "Username can only contain letters, numbers, hyphens, and underscores",
+        error:
+          "Username can only contain letters, numbers, hyphens, and underscores",
       };
     }
 

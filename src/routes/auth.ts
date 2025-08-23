@@ -35,20 +35,25 @@ function mergeUserSettings(
 
   if (!updates) {
     return {
-      defaultPermissions: base.defaultPermissions || defaults.defaultPermissions!,
-      emailNotifications: base.emailNotifications ?? defaults.emailNotifications!,
+      defaultPermissions:
+        base.defaultPermissions || defaults.defaultPermissions!,
+      emailNotifications:
+        base.emailNotifications ?? defaults.emailNotifications!,
       maxNestingDepth: base.maxNestingDepth || defaults.maxNestingDepth!,
     };
   }
 
   return {
-    defaultPermissions: updates.defaultPermissions ||
+    defaultPermissions:
+      updates.defaultPermissions ||
       base.defaultPermissions ||
       defaults.defaultPermissions!,
-    emailNotifications: updates.emailNotifications ??
+    emailNotifications:
+      updates.emailNotifications ??
       base.emailNotifications ??
       defaults.emailNotifications!,
-    maxNestingDepth: updates.maxNestingDepth ||
+    maxNestingDepth:
+      updates.maxNestingDepth ||
       base.maxNestingDepth ||
       defaults.maxNestingDepth!,
   };
@@ -83,7 +88,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  identifier: z.string().min(1, "Username or email is required"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -242,19 +247,45 @@ export class AuthRoutes {
       }),
       async (c) => {
         try {
-          const data = await c.req.json();
+          const data = c.req.valid("json");
+
+          getAuthLogger().info("🔍 DEBUG: Raw request data received", {
+            identifier: data.identifier,
+            passwordLength: data.password?.length || 0,
+            hasPassword: !!data.password,
+            requestKeys: Object.keys(data),
+          });
 
           getAuthLogger().info("Login attempt", {
-            username: data.username,
+            identifier: data.identifier,
           });
 
           // Use AuthService for login
+          getAuthLogger().info("🔍 DEBUG: Calling auth service login", {
+            identifier: data.identifier,
+            passwordProvided: !!data.password,
+          });
+
           const result = await this.authService.login({
-            identifier: data.username,
+            identifier: data.identifier,
             password: data.password,
           });
 
+          getAuthLogger().info("🔍 DEBUG: Auth service response", {
+            success: result.success,
+            hasUser: !!result.user,
+            hasSession: !!result.session,
+            errorCode: result.error?.code,
+            errorMessage: result.error?.message,
+          });
+
           if (!result.success) {
+            getAuthLogger().error("🔍 DEBUG: Login failed", {
+              identifier: data.identifier,
+              errorCode: result.error!.code,
+              errorMessage: result.error!.message,
+            });
+
             return c.json(
               {
                 error: {
@@ -288,7 +319,10 @@ export class AuthRoutes {
             },
           });
         } catch (error) {
-          getAuthLogger().error("Login error", { error });
+          getAuthLogger().error("🔍 DEBUG: Login route error", {
+            error: (error as Error).message,
+            stack: (error as Error).stack,
+          });
           return c.json(
             {
               error: {
@@ -306,7 +340,8 @@ export class AuthRoutes {
     // User logout
     this.app.post("/logout", async (c) => {
       try {
-        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken =
+          c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (sessionToken) {
@@ -340,7 +375,8 @@ export class AuthRoutes {
     // Get current user profile
     this.app.get("/profile", async (c) => {
       try {
-        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken =
+          c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -443,7 +479,8 @@ export class AuthRoutes {
       async (c) => {
         try {
           const data = c.req.valid("json");
-          const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+          const sessionToken =
+            c.req.header("authorization")?.replace("Bearer ", "") ||
             c.req.header("x-session-token");
 
           if (!sessionToken) {
@@ -511,16 +548,16 @@ export class AuthRoutes {
               user.settings,
               data.settings
                 ? {
-                  ...(data.settings.defaultPermissions !== undefined && {
-                    defaultPermissions: data.settings.defaultPermissions,
-                  }),
-                  ...(data.settings.emailNotifications !== undefined && {
-                    emailNotifications: data.settings.emailNotifications,
-                  }),
-                  ...(data.settings.maxNestingDepth !== undefined && {
-                    maxNestingDepth: data.settings.maxNestingDepth,
-                  }),
-                }
+                    ...(data.settings.defaultPermissions !== undefined && {
+                      defaultPermissions: data.settings.defaultPermissions,
+                    }),
+                    ...(data.settings.emailNotifications !== undefined && {
+                      emailNotifications: data.settings.emailNotifications,
+                    }),
+                    ...(data.settings.maxNestingDepth !== undefined && {
+                      maxNestingDepth: data.settings.maxNestingDepth,
+                    }),
+                  }
                 : undefined,
             ),
             updatedAt: new Date(),
@@ -581,7 +618,8 @@ export class AuthRoutes {
       async (c) => {
         try {
           const data = c.req.valid("json");
-          const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+          const sessionToken =
+            c.req.header("authorization")?.replace("Bearer ", "") ||
             c.req.header("x-session-token");
 
           if (!sessionToken) {
@@ -699,7 +737,8 @@ export class AuthRoutes {
     // List user sessions
     this.app.get("/sessions", async (c) => {
       try {
-        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken =
+          c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -782,7 +821,8 @@ export class AuthRoutes {
     this.app.delete("/sessions/:sessionId", async (c) => {
       try {
         const sessionId = c.req.param("sessionId");
-        const sessionToken = c.req.header("authorization")?.replace("Bearer ", "") ||
+        const sessionToken =
+          c.req.header("authorization")?.replace("Bearer ", "") ||
           c.req.header("x-session-token");
 
         if (!sessionToken) {
@@ -802,7 +842,8 @@ export class AuthRoutes {
           "sessions",
           sessionToken,
         ]);
-        const currentSession = currentSessionResult.value as SessionObject | null;
+        const currentSession =
+          currentSessionResult.value as SessionObject | null;
 
         if (
           !currentSession ||

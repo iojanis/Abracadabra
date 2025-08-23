@@ -1,34 +1,875 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Abracadabra Client Example</title>
-    <style>
-      body { font-family: sans-serif; margin: 2em; }
-      #app { display: flex; gap: 2em; }
-      #sidebar { width: 200px; }
-      #editor { flex-grow: 1; }
-      textarea { width: 100%; height: 400px; }
-      ul { list-style: none; padding: 0; }
-      li { padding: 5px; cursor: pointer; }
-      li:hover { background-color: #eee; }
-      .active { background-color: #ddd; }
-    </style>
-  </head>
-  <body>
-    <h1>Abracadabra Client Example</h1>
-    <div id="app">
-      <div id="sidebar">
-        <h2>Documents</h2>
-        <button id="fetch-index">Fetch Index</button>
-        <ul id="doc-list"></ul>
-      </div>
-      <div id="editor">
-        <h2 id="current-doc-title">Select a document</h2>
-        <textarea id="doc-content" disabled></textarea>
-      </div>
-    </div>
-    <script type="module" src="/main.ts"></script>
-  </body>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Abracadabra Client - Full-Featured Example</title>
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+                    sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background-color: #f5f5f5;
+            }
+
+            .container {
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+
+            .header {
+                background: #2563eb;
+                color: white;
+                padding: 1rem 0;
+                margin-bottom: 2rem;
+                border-radius: 8px;
+            }
+
+            .header h1 {
+                text-align: center;
+                margin-bottom: 0.5rem;
+            }
+
+            .header-subtitle {
+                text-align: center;
+                opacity: 0.9;
+                font-size: 0.9rem;
+            }
+
+            .debug-panel {
+                background: #1f2937;
+                color: #e5e7eb;
+                border-radius: 8px;
+                padding: 1rem;
+                margin-bottom: 2rem;
+            }
+
+            .debug-panel h3 {
+                margin-bottom: 1rem;
+                color: #60a5fa;
+            }
+
+            .debug-buttons {
+                display: flex;
+                gap: 0.5rem;
+                margin-bottom: 1rem;
+                flex-wrap: wrap;
+            }
+
+            .debug-log {
+                background: #111827;
+                border-radius: 4px;
+                padding: 1rem;
+                height: 200px;
+                overflow-y: auto;
+                font-family:
+                    "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+                    "Courier New", monospace;
+                font-size: 12px;
+                line-height: 1.4;
+            }
+
+            .log-entry {
+                margin-bottom: 2px;
+                padding: 2px 0;
+            }
+
+            .log-time {
+                color: #6b7280;
+                margin-right: 8px;
+            }
+
+            .log-info .log-message {
+                color: #e5e7eb;
+            }
+            .log-success .log-message {
+                color: #10b981;
+            }
+            .log-warn .log-message {
+                color: #f59e0b;
+            }
+            .log-error .log-message {
+                color: #ef4444;
+            }
+
+            .connection-status {
+                background: white;
+                padding: 1rem;
+                border-radius: 8px;
+                margin-bottom: 2rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .connection-indicators {
+                display: flex;
+                gap: 1rem;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+
+            .indicator {
+                padding: 0.25rem 0.75rem;
+                border-radius: 20px;
+                font-size: 0.875rem;
+                font-weight: 500;
+            }
+
+            .indicator.online {
+                background: #d1fae5;
+                color: #065f46;
+            }
+            .indicator.offline {
+                background: #fee2e2;
+                color: #991b1b;
+            }
+            .indicator.connected {
+                background: #dbeafe;
+                color: #1e40af;
+            }
+            .indicator.disconnected {
+                background: #fef3c7;
+                color: #92400e;
+            }
+            .indicator.enabled {
+                background: #e0e7ff;
+                color: #3730a3;
+            }
+            .indicator.disabled {
+                background: #f3f4f6;
+                color: #6b7280;
+            }
+
+            /* Authentication Section */
+            #auth-section {
+                background: white;
+                border-radius: 8px;
+                padding: 2rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                max-width: 500px;
+                margin: 0 auto;
+            }
+
+            .auth-tabs {
+                display: flex;
+                margin-bottom: 2rem;
+                border-bottom: 1px solid #e5e7eb;
+            }
+
+            .auth-tab {
+                flex: 1;
+                text-align: center;
+                padding: 1rem;
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-size: 1rem;
+                color: #6b7280;
+                transition: color 0.2s;
+            }
+
+            .auth-tab.active {
+                color: #2563eb;
+                border-bottom: 2px solid #2563eb;
+            }
+
+            .auth-form {
+                display: none;
+            }
+
+            .auth-form.active {
+                display: block;
+            }
+
+            /* Main Section */
+            #main-section {
+                display: none;
+            }
+
+            .user-profile {
+                background: white;
+                padding: 1rem;
+                border-radius: 8px;
+                margin-bottom: 2rem;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .user-name {
+                font-weight: 600;
+                font-size: 1.1rem;
+                margin-right: 0.5rem;
+            }
+
+            .user-email {
+                color: #6b7280;
+                font-size: 0.9rem;
+            }
+
+            .main-content {
+                display: grid;
+                grid-template-columns: 300px 1fr 300px;
+                gap: 2rem;
+            }
+
+            @media (max-width: 1200px) {
+                .main-content {
+                    grid-template-columns: 1fr;
+                    gap: 1rem;
+                }
+            }
+
+            /* Sidebar */
+            .sidebar {
+                background: white;
+                border-radius: 8px;
+                padding: 1.5rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                height: fit-content;
+            }
+
+            .sidebar h2 {
+                margin-bottom: 1rem;
+                font-size: 1.25rem;
+            }
+
+            .doc-list {
+                list-style: none;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+
+            .doc-item {
+                padding: 0.75rem;
+                margin-bottom: 0.5rem;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+
+            .doc-item:hover {
+                background: #f9fafb;
+                border-color: #d1d5db;
+            }
+
+            .doc-item.active {
+                background: #eff6ff;
+                border-color: #2563eb;
+            }
+
+            .doc-title {
+                font-weight: 500;
+                display: block;
+                margin-bottom: 0.25rem;
+            }
+
+            .doc-path {
+                font-size: 0.8rem;
+                color: #6b7280;
+                display: block;
+                margin-bottom: 0.25rem;
+            }
+
+            .doc-meta {
+                font-size: 0.75rem;
+                color: #9ca3af;
+                display: block;
+                margin-bottom: 0.5rem;
+            }
+
+            .doc-actions {
+                display: flex;
+                gap: 0.25rem;
+            }
+
+            /* Editor */
+            .editor {
+                background: white;
+                border-radius: 8px;
+                padding: 1.5rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .editor h2 {
+                margin-bottom: 1rem;
+                font-size: 1.25rem;
+            }
+
+            #doc-content {
+                width: 100%;
+                height: 500px;
+                padding: 1rem;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                font-family:
+                    "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+                    "Courier New", monospace;
+                font-size: 14px;
+                line-height: 1.5;
+                resize: vertical;
+            }
+
+            #doc-content:focus {
+                outline: none;
+                border-color: #2563eb;
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            }
+
+            /* Right Sidebar */
+            .tools-panel {
+                display: flex;
+                flex-direction: column;
+                gap: 2rem;
+            }
+
+            .panel {
+                background: white;
+                border-radius: 8px;
+                padding: 1.5rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .panel h3 {
+                margin-bottom: 1rem;
+                font-size: 1.1rem;
+            }
+
+            .file-item {
+                padding: 0.75rem;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+                margin-bottom: 0.5rem;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+            }
+
+            .file-info {
+                flex: 1;
+            }
+
+            .file-name {
+                font-weight: 500;
+                display: block;
+                margin-bottom: 0.25rem;
+            }
+
+            .file-size,
+            .file-date {
+                font-size: 0.8rem;
+                color: #6b7280;
+                margin-right: 0.5rem;
+            }
+
+            .file-description {
+                font-size: 0.85rem;
+                color: #374151;
+                margin: 0.25rem 0;
+            }
+
+            .file-tags {
+                margin-top: 0.5rem;
+            }
+
+            .tag {
+                display: inline-block;
+                background: #e0e7ff;
+                color: #3730a3;
+                padding: 0.125rem 0.5rem;
+                border-radius: 12px;
+                font-size: 0.75rem;
+                margin-right: 0.25rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .file-actions {
+                display: flex;
+                flex-direction: column;
+                gap: 0.25rem;
+            }
+
+            /* Forms */
+            .form-group {
+                margin-bottom: 1rem;
+            }
+
+            .form-group label {
+                display: block;
+                margin-bottom: 0.5rem;
+                font-weight: 500;
+                color: #374151;
+            }
+
+            .form-group input,
+            .form-group textarea,
+            .form-group select {
+                width: 100%;
+                padding: 0.75rem;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                font-size: 0.875rem;
+                transition: border-color 0.2s;
+            }
+
+            .form-group input:focus,
+            .form-group textarea:focus,
+            .form-group select:focus {
+                outline: none;
+                border-color: #2563eb;
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            }
+
+            .form-group textarea {
+                min-height: 80px;
+                resize: vertical;
+            }
+
+            .form-group input[type="checkbox"] {
+                width: auto;
+                margin-right: 0.5rem;
+            }
+
+            .form-actions {
+                display: flex;
+                gap: 0.5rem;
+                justify-content: flex-end;
+                margin-top: 1.5rem;
+            }
+
+            /* Buttons */
+            .btn {
+                display: inline-block;
+                padding: 0.75rem 1.5rem;
+                background: #2563eb;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 0.875rem;
+                font-weight: 500;
+                cursor: pointer;
+                text-decoration: none;
+                text-align: center;
+                transition: all 0.2s;
+            }
+
+            .btn:hover {
+                background: #1d4ed8;
+                transform: translateY(-1px);
+            }
+
+            .btn:active {
+                transform: translateY(0);
+            }
+
+            .btn.btn-sm {
+                padding: 0.5rem 1rem;
+                font-size: 0.8rem;
+            }
+
+            .btn.btn-secondary {
+                background: #6b7280;
+            }
+
+            .btn.btn-secondary:hover {
+                background: #4b5563;
+            }
+
+            .btn.btn-danger {
+                background: #dc2626;
+            }
+
+            .btn.btn-danger:hover {
+                background: #b91c1c;
+            }
+
+            .btn:disabled {
+                background: #9ca3af;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            .btn:disabled:hover {
+                background: #9ca3af;
+                transform: none;
+            }
+
+            /* Modal */
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+            }
+
+            .modal {
+                background: white;
+                border-radius: 8px;
+                padding: 2rem;
+                max-width: 500px;
+                width: 90%;
+                max-height: 90vh;
+                overflow-y: auto;
+                box-shadow:
+                    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            }
+
+            .modal h3 {
+                margin-bottom: 1.5rem;
+                font-size: 1.25rem;
+            }
+
+            /* Responsive Design */
+            @media (max-width: 768px) {
+                .main-content {
+                    grid-template-columns: 1fr;
+                }
+
+                .debug-buttons {
+                    flex-direction: column;
+                }
+
+                .connection-indicators {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+
+                .user-profile {
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1rem;
+                }
+            }
+
+            /* Loading States */
+            .loading {
+                opacity: 0.6;
+                pointer-events: none;
+            }
+
+            .spinner {
+                border: 2px solid #f3f3f3;
+                border-top: 2px solid #2563eb;
+                border-radius: 50%;
+                width: 20px;
+                height: 20px;
+                animation: spin 1s linear infinite;
+                display: inline-block;
+                margin-right: 0.5rem;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <h1>🎩 Abracadabra Client</h1>
+                <div class="header-subtitle">
+                    Professional Collaborative Document Platform
+                </div>
+            </div>
+
+            <!-- Connection Status -->
+            <div class="connection-status">
+                <div id="connection-status">
+                    <div class="connection-indicators">
+                        <span class="indicator offline">🔌 Connecting...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authentication Section -->
+            <div id="auth-section">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" data-tab="login">
+                        Sign In
+                    </button>
+                    <button class="auth-tab" data-tab="register">
+                        Sign Up
+                    </button>
+                </div>
+
+                <form id="login-form" class="auth-form active">
+                    <div class="form-group">
+                        <label for="login-identifier">Username or Email</label>
+                        <input
+                            type="text"
+                            id="login-identifier"
+                            name="identifier"
+                            required
+                            placeholder="Enter your username or email"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input
+                            type="password"
+                            id="login-password"
+                            name="password"
+                            required
+                            placeholder="Enter your password"
+                        />
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn">Sign In</button>
+                    </div>
+                </form>
+
+                <form id="register-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="register-username">Username</label>
+                        <input
+                            type="text"
+                            id="register-username"
+                            name="username"
+                            required
+                            placeholder="Choose a username"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">Email</label>
+                        <input
+                            type="email"
+                            id="register-email"
+                            name="email"
+                            required
+                            placeholder="Enter your email"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="register-display-name">Display Name</label>
+                        <input
+                            type="text"
+                            id="register-display-name"
+                            name="displayName"
+                            required
+                            placeholder="Your full name"
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Password</label>
+                        <input
+                            type="password"
+                            id="register-password"
+                            name="password"
+                            required
+                            placeholder="Choose a strong password"
+                        />
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn">
+                            Create Account
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Main Application -->
+            <div id="main-section">
+                <!-- User Info -->
+                <div id="user-info"></div>
+
+                <!-- Main Content Grid -->
+                <div class="main-content">
+                    <!-- Left Sidebar - Documents -->
+                    <div class="sidebar">
+                        <h2>📚 Documents</h2>
+                        <ul id="doc-list" class="doc-list">
+                            <li
+                                style="
+                                    padding: 1rem;
+                                    text-align: center;
+                                    color: #6b7280;
+                                "
+                            >
+                                Loading documents...
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Main Editor -->
+                    <div class="editor">
+                        <h2 id="current-doc-title">
+                            Select a document to start editing
+                        </h2>
+                        <textarea
+                            id="doc-content"
+                            disabled
+                            placeholder="Select a document from the sidebar to start editing..."
+                        ></textarea>
+                    </div>
+
+                    <!-- Right Sidebar - Tools -->
+                    <div class="tools-panel">
+                        <!-- Create Document -->
+                        <div class="panel">
+                            <h3>➕ New Document</h3>
+                            <form id="create-doc-form">
+                                <div class="form-group">
+                                    <label for="create-path"
+                                        >Document Path</label
+                                    >
+                                    <input
+                                        type="text"
+                                        id="create-path"
+                                        name="path"
+                                        required
+                                        placeholder="e.g., projects/my-document.md"
+                                    />
+                                </div>
+                                <div class="form-group">
+                                    <label for="create-title">Title</label>
+                                    <input
+                                        type="text"
+                                        id="create-title"
+                                        name="title"
+                                        placeholder="Optional document title"
+                                    />
+                                </div>
+                                <div class="form-group">
+                                    <label for="create-description"
+                                        >Description</label
+                                    >
+                                    <textarea
+                                        id="create-description"
+                                        name="description"
+                                        placeholder="Optional description"
+                                    ></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="create-content"
+                                        >Initial Content</label
+                                    >
+                                    <textarea
+                                        id="create-content"
+                                        name="initialContent"
+                                        placeholder="Start writing here..."
+                                    ></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            name="isPublic"
+                                        />
+                                        Make this document public
+                                    </label>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn">
+                                        Create Document
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- File Upload -->
+                        <div class="panel">
+                            <h3>📎 Upload Files</h3>
+                            <form id="upload-form">
+                                <div class="form-group">
+                                    <label for="upload-file">Select File</label>
+                                    <input
+                                        type="file"
+                                        id="upload-file"
+                                        name="file"
+                                        required
+                                    />
+                                </div>
+                                <div class="form-group">
+                                    <label for="upload-description"
+                                        >Description</label
+                                    >
+                                    <input
+                                        type="text"
+                                        id="upload-description"
+                                        name="description"
+                                        placeholder="Optional description"
+                                    />
+                                </div>
+                                <div class="form-group">
+                                    <label for="upload-tags">Tags</label>
+                                    <input
+                                        type="text"
+                                        id="upload-tags"
+                                        name="tags"
+                                        placeholder="tag1, tag2, tag3"
+                                    />
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn">
+                                        Upload File
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- Files List -->
+                        <div class="panel">
+                            <h3>📁 Uploaded Files</h3>
+                            <div id="files-list">
+                                <p style="color: #6b7280; text-align: center">
+                                    No files uploaded yet.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script type="module" src="/main.ts"></script>
+
+        <script>
+            // Auth tab switching
+            document.addEventListener("DOMContentLoaded", () => {
+                const tabs = document.querySelectorAll(".auth-tab");
+                const forms = document.querySelectorAll(".auth-form");
+
+                tabs.forEach((tab) => {
+                    tab.addEventListener("click", () => {
+                        const targetTab = tab.dataset.tab;
+
+                        // Update tab states
+                        tabs.forEach((t) => t.classList.remove("active"));
+                        tab.classList.add("active");
+
+                        // Update form visibility
+                        forms.forEach((form) => {
+                            form.classList.remove("active");
+                            if (form.id === `${targetTab}-form`) {
+                                form.classList.add("active");
+                            }
+                        });
+                    });
+                });
+            });
+        </script>
+    </body>
 </html>

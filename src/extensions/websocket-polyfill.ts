@@ -142,6 +142,11 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
     };
   }
 
+  // Add .addListener() method - alias for .on() for Node.js compatibility
+  if (!polyfilliedWs.addListener) {
+    polyfilliedWs.addListener = polyfilliedWs.on;
+  }
+
   // Add .off() method - maps to removeEventListener with enhanced error handling
   if (!polyfilliedWs.off) {
     polyfilliedWs.off = function (
@@ -168,6 +173,11 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
         });
       }
     };
+  }
+
+  // Add .removeListener() method - alias for .off() for Node.js compatibility
+  if (!polyfilliedWs.removeListener) {
+    polyfilliedWs.removeListener = polyfilliedWs.off;
   }
 
   // Add .once() method - addEventListener with auto-removal and timeout protection
@@ -211,10 +221,15 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
         } finally {
           // Clean up the listener after it fires
           try {
-            const eventListener = listenerMap.get(wrappedListener);
-            if (eventListener) {
-              this.removeEventListener(event, eventListener);
-              listenerMap.delete(wrappedListener);
+            // Use the polyfilled off method instead of direct removeEventListener
+            if (typeof (this as any).off === "function") {
+              (this as any).off(event, wrappedListener);
+            } else {
+              const eventListener = listenerMap.get(wrappedListener);
+              if (eventListener) {
+                this.removeEventListener(event, eventListener);
+                listenerMap.delete(wrappedListener);
+              }
             }
           } catch (cleanupError) {
             logger.warn("Error during once listener cleanup", {

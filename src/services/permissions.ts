@@ -113,7 +113,7 @@ export class PermissionService {
   ): boolean {
     return (
       this.getPermissionValue(userLevel) >=
-        this.getPermissionValue(requiredLevel)
+      this.getPermissionValue(requiredLevel)
     );
   }
 
@@ -124,7 +124,9 @@ export class PermissionService {
     level1: PermissionLevel,
     level2: PermissionLevel,
   ): PermissionLevel {
-    return this.getPermissionValue(level1) >= this.getPermissionValue(level2) ? level1 : level2;
+    return this.getPermissionValue(level1) >= this.getPermissionValue(level2)
+      ? level1
+      : level2;
   }
 
   // ============================================================================
@@ -146,6 +148,33 @@ export class PermissionService {
 
     // Normalize path
     const normalizedPath = this.normalizePath(documentPath);
+
+    // Check if user owns this path (accessing their own user directory)
+    const pathComponents = normalizedPath.split("/").filter(Boolean);
+    if (pathComponents.length > 0) {
+      const pathUsername = pathComponents[0];
+
+      // Look up user to get their username
+      const userResult = await this.kv.get(["users", "by_id", userId]);
+      const user = userResult.value as any;
+
+      if (user && user.username === pathUsername) {
+        getPermissionLogger().debug(
+          "User accessing own path - granting OWNER permissions",
+          {
+            userId,
+            username: user.username,
+            documentPath: normalizedPath,
+          },
+        );
+        return {
+          level: "OWNER",
+          inherited: false,
+          explicit: true,
+          publicAccess: false,
+        };
+      }
+    }
 
     // Check direct permissions on this document
     const directPermission = await this.getDirectPermission(
@@ -275,7 +304,8 @@ export class PermissionService {
       "permissions",
       parentPath,
     ]);
-    const parentPermissions = parentPermissionsResult.value as DocumentPermissions | null;
+    const parentPermissions =
+      parentPermissionsResult.value as DocumentPermissions | null;
 
     if (!parentPermissions?.inherit_from_parent) {
       return {
@@ -544,7 +574,8 @@ export class PermissionService {
       "permissions",
       normalizedPath,
     ]);
-    const current = (currentResult.value as DocumentPermissions) ||
+    const current =
+      (currentResult.value as DocumentPermissions) ||
       this.getDefaultPermissions(actorId);
 
     // Merge permissions
@@ -594,7 +625,8 @@ export class PermissionService {
       "permissions",
       normalizedPath,
     ]);
-    const current = (currentResult.value as DocumentPermissions) ||
+    const current =
+      (currentResult.value as DocumentPermissions) ||
       this.getDefaultPermissions(actorId);
 
     // Remove from other lists first
@@ -617,7 +649,7 @@ export class PermissionService {
       case "OWNER":
         current.owner = userId;
         break;
-        // ADMIN and NONE are handled differently
+      // ADMIN and NONE are handled differently
     }
 
     await this.kv.set(["documents", "permissions", normalizedPath], current);
@@ -690,9 +722,9 @@ export class PermissionService {
    */
   private normalizePath(path: string): string {
     return path
-        .replace(/^\/+|\/+$/g, "")
-        .replace(/\/+/g, "/")
-        .startsWith("/")
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/\/+/g, "/")
+      .startsWith("/")
       ? path
       : `/${path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")}`;
   }

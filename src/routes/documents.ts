@@ -111,25 +111,29 @@ export class DocumentRoutes {
   }
 
   private setupRoutes() {
-    // List user's documents
-    this.app.get("/", async (c) => {
+    // Shared handler for document listing
+    const listDocumentsHandler = async (c: any) => {
       try {
+        getDocumentRouteLogger().debug("Document listing route hit", {
+          path: c.req.path,
+          method: c.req.method,
+          headers: Object.fromEntries(c.req.raw.headers.entries()),
+        });
+
         const session = (c as any).get("session");
         const userId = session?.userId;
         const username = session?.username;
 
-        if (!userId || !username) {
-          return c.json(
-            {
-              error: {
-                code: "AUTHENTICATION_REQUIRED",
-                message: "Authentication required",
-                timestamp: new Date().toISOString(),
-              },
-            },
-            401,
-          );
-        }
+        getDocumentRouteLogger().debug("Session data", {
+          hasSession: !!session,
+          userId,
+          username,
+          sessionKeys: session ? Object.keys(session) : [],
+        });
+
+        // Support both authenticated and unauthenticated requests
+        // Authenticated users get their personal documents
+        // Unauthenticated users get public documents only
 
         const limit = parseInt(c.req.query("limit") || "50");
         const offset = parseInt(c.req.query("offset") || "0");
@@ -143,12 +147,48 @@ export class DocumentRoutes {
           includeChildren,
         };
 
-        const documents = await this.documentService.listUserDocuments(
-          username,
-          options,
-        );
+        getDocumentRouteLogger().debug("Query options", {
+          limit,
+          offset,
+          includePermissions,
+          includeChildren,
+        });
 
-        return c.json({
+        let documents;
+
+        if (userId && username) {
+          getDocumentRouteLogger().info(
+            "Authenticated user listing documents",
+            {
+              userId,
+              username,
+              options,
+            },
+          );
+          // Authenticated user - return their documents
+          documents = await this.documentService.listUserDocuments(
+            username,
+            options,
+          );
+        } else {
+          getDocumentRouteLogger().info(
+            "Unauthenticated user accessing documents",
+            {
+              note: "Returning empty array for public documents",
+            },
+          );
+          // Unauthenticated user - return public documents only
+          // For now, return empty array as public document listing needs to be implemented
+          // TODO: Implement public document listing in DocumentService
+          documents = [];
+        }
+
+        getDocumentRouteLogger().debug("Documents retrieved", {
+          count: documents.length,
+          authenticated: !!(userId && username),
+        });
+
+        const response = {
           data: {
             documents,
             meta: {
@@ -158,7 +198,16 @@ export class DocumentRoutes {
               hasMore: documents.length === limit,
             },
           },
+        };
+
+        getDocumentRouteLogger().info("Document listing successful", {
+          documentCount: documents.length,
+          authenticated: !!(userId && username),
+          userId,
+          username,
         });
+
+        return c.json(response);
       } catch (error) {
         getDocumentRouteLogger().error("Error listing documents", {
           error: (error as Error).message,
@@ -175,7 +224,10 @@ export class DocumentRoutes {
           500,
         );
       }
-    });
+    };
+
+    // List user's documents (handle both with and without trailing slash)
+    this.app.get("/", listDocumentsHandler);
 
     // Create new document
     this.app.post(
@@ -217,7 +269,8 @@ export class DocumentRoutes {
           }
 
           const data = c.req.valid("json");
-          const path = c.req.path.replace("/api/documents", "") || `/${username}/untitled`;
+          const path =
+            c.req.path.replace("/api/documents", "") || `/${username}/untitled`;
 
           // Ensure path starts with username
           const normalizedPath = path.startsWith(`/${username}`)
@@ -243,7 +296,8 @@ export class DocumentRoutes {
                 {
                   error: {
                     code: "PERMISSION_DENIED",
-                    message: "Insufficient permissions to create document in this location",
+                    message:
+                      "Insufficient permissions to create document in this location",
                     timestamp: new Date().toISOString(),
                   },
                 },
@@ -309,26 +363,12 @@ export class DocumentRoutes {
       },
     );
 
-    // Get document
-    this.app.get("/*", async (c) => {
+    // Get document - only match actual document paths, not root
+    this.app.get("/*/*", async (c) => {
       try {
         const session = (c as any).get("session");
         const userId = session?.userId;
         const path = c.req.path.replace("/api/documents", "") || "/";
-
-        if (!path || path === "/") {
-          // This is handled by the list documents route
-          return c.json(
-            {
-              error: {
-                code: "INVALID_PATH",
-                message: "Invalid document path",
-                timestamp: new Date().toISOString(),
-              },
-            },
-            400,
-          );
-        }
 
         getDocumentRouteLogger().debug("Getting document", { path, userId });
 
@@ -353,7 +393,8 @@ export class DocumentRoutes {
           }
         } else {
           // Check if document is public
-          const permissions = await this.permissionService.getDocumentPermissions(path);
+          const permissions =
+            await this.permissionService.getDocumentPermissions(path);
           if (!permissions || permissions.publicAccess === "NONE") {
             return c.json(
               {
@@ -807,7 +848,8 @@ export class DocumentRoutes {
             {
               error: {
                 code: "PERMISSION_DENIED",
-                message: "Insufficient permissions to view document permissions",
+                message:
+                  "Insufficient permissions to view document permissions",
                 timestamp: new Date().toISOString(),
               },
             },
@@ -815,7 +857,8 @@ export class DocumentRoutes {
           );
         }
 
-        const permissions = await this.permissionService.getDocumentPermissions(path);
+        const permissions =
+          await this.permissionService.getDocumentPermissions(path);
 
         if (!permissions) {
           return c.json(
@@ -929,7 +972,8 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message: "Insufficient permissions to modify document permissions",
+                  message:
+                    "Insufficient permissions to modify document permissions",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1029,7 +1073,8 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message: "Insufficient permissions to grant document permission",
+                  message:
+                    "Insufficient permissions to grant document permission",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1119,7 +1164,8 @@ export class DocumentRoutes {
             {
               error: {
                 code: "PERMISSION_DENIED",
-                message: "Insufficient permissions to revoke document permission",
+                message:
+                  "Insufficient permissions to revoke document permission",
                 timestamp: new Date().toISOString(),
               },
             },
@@ -1182,7 +1228,8 @@ export class DocumentRoutes {
               {
                 error: {
                   code: "PERMISSION_DENIED",
-                  message: "Insufficient permissions to view document statistics",
+                  message:
+                    "Insufficient permissions to view document statistics",
                   timestamp: new Date().toISOString(),
                 },
               },
@@ -1191,13 +1238,15 @@ export class DocumentRoutes {
           }
         } else {
           // Check if document is public
-          const permissions = await this.permissionService.getDocumentPermissions(path);
+          const permissions =
+            await this.permissionService.getDocumentPermissions(path);
           if (!permissions || permissions.publicAccess === "NONE") {
             return c.json(
               {
                 error: {
                   code: "AUTHENTICATION_REQUIRED",
-                  message: "Authentication required to access document statistics",
+                  message:
+                    "Authentication required to access document statistics",
                   timestamp: new Date().toISOString(),
                 },
               },
