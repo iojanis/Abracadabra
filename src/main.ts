@@ -933,7 +933,7 @@ class AbracadabraServer {
       handler: this.app.fetch,
     });
 
-    this.logger.info(`🎯 Server listening on http://${host}:${port}`, {
+    this.logger.info(`Server listening on http://${host}:${port}`, {
       port,
       host,
     });
@@ -1045,7 +1045,7 @@ async function bootstrap(): Promise<void> {
   };
 
   try {
-    mainLogger.info("🎩 Bootstrapping Abracadabra Server...", {
+    mainLogger.info("Bootstrapping Abracadabra Server...", {
       environment: envInfo,
       denoVersion: Deno.version.deno,
     });
@@ -1113,7 +1113,7 @@ async function bootstrap(): Promise<void> {
     }
 
     const startupTime = Date.now() - startTime;
-    mainLogger.info("🚀 Abracadabra Server bootstrap completed successfully!", {
+    mainLogger.info("🎩 Abracadabra Server bootstrap completed successfully!", {
       startupTime: `${startupTime}ms`,
       environment: envInfo.platform,
       deployId,
