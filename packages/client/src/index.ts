@@ -877,6 +877,7 @@ export interface ClientEvents {
   "sync:conflict": (data: { operation: OfflineOperation; serverData: any; clientData: any }) => void;
   offline: () => void;
   online: () => void;
+  message: (data: any) => void; // For general-purpose server-sent messages
   [key: string]: (...args: any[]) => void;
 }
 
@@ -1041,6 +1042,14 @@ export class AbracadabraClient extends EventEmitter<ClientEvents> {
         },
         onSynced: () => {
           this.emit("sync:complete");
+        },
+        onStateless: ({ payload }) => {
+          try {
+            const message = JSON.parse(payload);
+            this.emit('message', message);
+          } catch (error) {
+            console.error("Failed to parse stateless message from server:", error);
+          }
         },
       });
 
@@ -1808,6 +1817,21 @@ export class AbracadabraClient extends EventEmitter<ClientEvents> {
 
   public async cancelOfflineOperation(operationId: string): Promise<void> {
     return this.offlineQueue.cancel(operationId);
+  }
+
+  /**
+   * Send a general-purpose message to the server.
+   * @param type - The message type.
+   * @param payload - The message payload.
+   */
+  public sendMessage(type: string, payload: any): void {
+    if (!this.hocuspocus || this.hocuspocus.status !== 'connected') {
+      console.warn("Cannot send message: client is not connected.");
+      return;
+    }
+
+    const message = JSON.stringify({ type, payload });
+    this.hocuspocus.sendStateless(message);
   }
 }
 

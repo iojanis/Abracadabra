@@ -50,6 +50,8 @@ export interface PolyfilliedWebSocket extends WebSocket {
   on(event: string, listener: (...args: any[]) => void): void;
   off(event: string, listener: (...args: any[]) => void): void;
   once(event: string, listener: (...args: any[]) => void): void;
+  addListener(event: string, listener: (...args: any[]) => void): void;
+  removeListener(event: string, listener: (...args: any[]) => void): void;
 }
 
 /**
@@ -131,12 +133,12 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
 
       try {
         this.addEventListener(event, eventListener);
-        logger.debug("WebSocket listener added", { event, isDeployEnv });
+        // logger.debug("WebSocket listener added", { event, isDeployEnv });
       } catch (error) {
-        logger.error("Failed to add WebSocket listener", {
-          event,
-          error: (error as Error).message,
-        });
+        // logger.error("Failed to add WebSocket listener", {
+        //   event,
+        //   error: (error as Error).message,
+        // });
         throw error;
       }
     };
@@ -158,7 +160,7 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
         if (eventListener) {
           this.removeEventListener(event, eventListener);
           listenerMap.delete(listener);
-          logger.debug("WebSocket listener removed", { event, isDeployEnv });
+          // logger.debug("WebSocket listener removed", { event, isDeployEnv });
         } else {
           logger.warn("Attempted to remove non-existent WebSocket listener", {
             event,
@@ -243,7 +245,7 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
       // Use the regular .on() method which handles the event conversion
       try {
         this.on(event, wrappedListener);
-        logger.debug("WebSocket once listener added", { event, isDeployEnv });
+        // logger.debug("WebSocket once listener added", { event, isDeployEnv });
       } catch (error) {
         logger.error("Failed to add WebSocket once listener", {
           event,
@@ -287,11 +289,11 @@ export function polyfillWebSocket(ws: WebSocket): PolyfilliedWebSocket {
     };
   }
 
-  logger.debug("WebSocket polyfill applied successfully", {
-    isDeployEnv,
-    polyfillAge: Date.now() - polyfillStartTime,
-    healthy: polyfillHealthy,
-  });
+  // logger.debug("WebSocket polyfill applied successfully", {
+  //   isDeployEnv,
+  //   polyfillAge: Date.now() - polyfillStartTime,
+  //   healthy: polyfillHealthy,
+  // });
   return polyfilliedWs;
 }
 
@@ -323,9 +325,9 @@ export function ensureNodeJSMethods(ws: WebSocket): PolyfilliedWebSocket {
       return ws;
     }
 
-    logger.debug("Applying WebSocket polyfill for Node.js compatibility", {
-      isDeployEnv,
-    });
+    // logger.debug("Applying WebSocket polyfill for Node.js compatibility", {
+    //   isDeployEnv,
+    // });
     return polyfillWebSocket(ws);
   } catch (error) {
     logger.error("Failed to ensure Node.js methods on WebSocket", {

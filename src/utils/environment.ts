@@ -1,5 +1,4 @@
-// Environment Detection Utility for Abracadabra Server
-// Centralized environment checks and configuration
+import { getEnv, getCwd, isDeno, isTest as runtimeIsTest } from "./runtime.ts";
 
 /**
  * Environment types
@@ -20,7 +19,7 @@ export interface EnvironmentInfo {
   denoEnv: string;
   deploymentId?: string;
   region?: string;
-  denoVersion: string;
+  denoVersion: string | undefined;
   hasFileSystemAccess: boolean;
   supportsLocalStorage: boolean;
 }
@@ -35,8 +34,8 @@ let cachedEnvironmentInfo: EnvironmentInfo | null = null;
  */
 export function isDenoDeploy(): boolean {
   return !!(
-    Deno.env.get("DENO_DEPLOYMENT_ID") ||
-    Deno.env.get("DENO_REGION") ||
+    getEnv("DENO_DEPLOYMENT_ID") ||
+    getEnv("DENO_REGION") ||
     globalThis.location?.hostname?.includes("deno.dev")
   );
 }
@@ -45,8 +44,8 @@ export function isDenoDeploy(): boolean {
  * Detect if running in production environment
  */
 export function isProduction(): boolean {
-  const nodeEnv = Deno.env.get("NODE_ENV");
-  const denoEnv = Deno.env.get("DENO_ENV");
+  const nodeEnv = getEnv("NODE_ENV");
+  const denoEnv = getEnv("DENO_ENV");
   return nodeEnv === "production" || denoEnv === "production" || isDenoDeploy();
 }
 
@@ -61,9 +60,9 @@ export function isDevelopment(): boolean {
  * Detect if running in test environment
  */
 export function isTest(): boolean {
-  const nodeEnv = Deno.env.get("NODE_ENV");
-  const denoEnv = Deno.env.get("DENO_ENV");
-  return nodeEnv === "test" || denoEnv === "test";
+  const nodeEnv = getEnv("NODE_ENV");
+  const denoEnv = getEnv("DENO_ENV");
+  return nodeEnv === "test" || denoEnv === "test" || (typeof Deno !== "undefined" && Deno.env.get("TEST_RUN") === "true");
 }
 
 /**
@@ -81,7 +80,7 @@ export function getEnvironment(): Environment {
 export function getDeploymentPlatform(): DeploymentPlatform {
   if (isDenoDeploy()) return "deno-deploy";
   if (Deno.env.get("DOCKER_CONTAINER")) return "docker";
-  if (Deno.env.get("KUBERNETES_SERVICE_HOST")) return "docker"; // Kubernetes
+  if (getEnv("KUBERNETES_SERVICE_HOST")) return "docker"; // Kubernetes
   return "local";
 }
 
@@ -93,7 +92,7 @@ export function hasFileSystemAccess(): boolean {
 
   try {
     // Try to access the current working directory
-    Deno.cwd();
+    getCwd();
     return true;
   } catch {
     return false;
@@ -106,13 +105,17 @@ export function hasFileSystemAccess(): boolean {
 export function supportsLocalStorage(): boolean {
   if (isDenoDeploy()) return false;
 
-  try {
-    // Try to check write permissions
-    const status = Deno.permissions.querySync({ name: "write" });
-    return status.state === "granted";
-  } catch {
-    return false;
+  if (isDeno) {
+    try {
+      // @ts-ignore: Deno global usage
+      const status = Deno.permissions.querySync({ name: "write" });
+      return status.state === "granted";
+    } catch {
+      return false;
+    }
   }
+  // Assume true for Node/Bun unless readonly fs
+  return true;
 }
 
 /**
@@ -129,14 +132,22 @@ export function getEnvironmentInfo(): EnvironmentInfo {
     isDevelopment: isDevelopment(),
     isTest: isTest(),
     platform: getDeploymentPlatform(),
-    nodeEnv: Deno.env.get("NODE_ENV") || "development",
-    denoEnv: Deno.env.get("DENO_ENV") || "development",
-    deploymentId: Deno.env.get("DENO_DEPLOYMENT_ID"),
-    region: Deno.env.get("DENO_REGION"),
-    denoVersion: Deno.version.deno,
+    nodeEnv: getEnv("NODE_ENV") || "development",
+    denoEnv: getEnv("DENO_ENV") || "development",
+    denoVersion: isDeno ? (Deno as any).version.deno : undefined,
     hasFileSystemAccess: hasFileSystemAccess(),
     supportsLocalStorage: supportsLocalStorage(),
   };
+
+  const deploymentId = getEnv("DENO_DEPLOYMENT_ID");
+  if (deploymentId) {
+    info.deploymentId = deploymentId;
+  }
+
+  const region = getEnv("DENO_REGION");
+  if (region) {
+    info.region = region;
+  }
 
   cachedEnvironmentInfo = info;
   return info;
@@ -146,7 +157,7 @@ export function getEnvironmentInfo(): EnvironmentInfo {
  * Get a short deployment identifier for logging
  */
 export function getDeploymentId(): string {
-  const deploymentId = Deno.env.get("DENO_DEPLOYMENT_ID");
+  const deploymentId = getEnv("DENO_DEPLOYMENT_ID");
   if (deploymentId) {
     return deploymentId.slice(0, 8);
   }
@@ -213,9 +224,9 @@ export function isFeatureSupported(feature: string): boolean {
  */
 function hasS3Configuration(): boolean {
   return !!(
-    Deno.env.get("S3_BUCKET") ||
-    Deno.env.get("AWS_S3_BUCKET") ||
-    Deno.env.get("uploads.s3_bucket")
+    getEnv("S3_BUCKET") ||
+    getEnv("AWS_S3_BUCKET") ||
+    getEnv("uploads.s3_bucket")
   );
 }
 
@@ -249,7 +260,7 @@ export function validateEnvironment(): { valid: boolean; errors: string[] } {
 
   // Check for required environment variables in production
   if (env.isProduction) {
-    if (!Deno.env.get("NODE_ENV") && !Deno.env.get("DENO_ENV")) {
+    if (!getEnv("NODE_ENV") && !getEnv("DENO_ENV")) {
       errors.push("NODE_ENV or DENO_ENV should be set to 'production'");
     }
   }

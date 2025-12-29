@@ -362,7 +362,16 @@ export class LoggingService {
         sinks: {
           console: getConsoleSink({
             formatter: (record) => {
-              const baseLog = {
+              interface LogEntry {
+                timestamp: string;
+                level: string;
+                category: string;
+                message: readonly unknown[];
+                deployment?: { id: string | undefined; region: string | undefined; };
+                [key: string]: any;
+              }
+
+              const baseLog: LogEntry = {
                 timestamp: new Date(record.timestamp).toISOString(),
                 level: record.level.toString(),
                 category: record.category.join(":"),

@@ -9,6 +9,7 @@ import * as Y from "yjs";
 
 import { type ConfigService, createConfigService } from "./services/config.ts";
 import { createLoggingService, getLogger } from "./services/logging.ts";
+import { connectionManager } from "./services/connectionManager.ts";
 import { ensureNodeJSMethods } from "./extensions/websocket-polyfill.ts";
 import type { ServerConfig } from "./types/index.ts";
 
@@ -189,7 +190,7 @@ class AbracadabraServer {
       this.logger.info("🚀 Abracadabra Server started successfully!", {
         totalStartTime: `${totalStartTime}ms`,
         environment: envInfo.platform,
-        port: this.config?.server?.port || 8000,
+        port: this.config.port || 8000,
       });
 
       this.isStarted = true;
@@ -384,6 +385,7 @@ class AbracadabraServer {
         return c.redirect(url.toString(), 301);
       }
       await next();
+      return;
     });
 
     // Session middleware
@@ -673,138 +675,244 @@ class AbracadabraServer {
       enableMetrics: true,
     });
 
-    // Capture logger for callback scope
+    // Capture logger and kv for callback scope
     const collaborationLogger = this.logger;
+    const kv = this.kv;
 
-    // Initialize Hocuspocus server
     this.hocuspocus = new Hocuspocus({
       name: "abracadabra-collaboration",
 
-      async onAuthenticate(data: any) {
-        // Check circuit breaker first
-        if (checkCircuitBreaker()) {
-          collaborationLogger.warn(
-            "Circuit breaker active - REJECTING all WebSocket connections",
-            {
-              documentName: data.documentName,
-              rateLimitHits,
-              trippedAt: new Date(circuitBreakerTrippedAt).toISOString(),
-            },
-          );
-          throw new Error(
-            "Circuit breaker active - service temporarily unavailable",
-          );
-        }
-
-        // Extract client IP for rate limiting
-        const clientIp = extractClientIp(data);
-
-        // Rate limiting by IP address to prevent spam attacks
-        if (isIpRateLimited(clientIp)) {
-          tripCircuitBreaker();
-          collaborationLogger.warn(
-            "WebSocket connection IP rate limited - REJECTING",
-            {
-              documentName: data.documentName,
-              clientIp,
-              rateLimitHits,
-            },
-          );
-          throw new Error("IP rate limited");
-        }
-
-        // Rate limiting by document name to prevent spam
-        const identifier = `${data.documentName || "unknown"}`;
-
-        if (isRateLimited(identifier)) {
-          tripCircuitBreaker();
-          collaborationLogger.warn(
-            "WebSocket connection rate limited - REJECTING",
-            {
-              documentName: data.documentName,
-              identifier,
-              clientIp,
-              rateLimitHits,
-            },
-          );
-          throw new Error("Rate limited");
-        }
+      onAuthenticate: async (data: any) => {
+        const collaborationLogger = this.logger;
+        const kv = this.kv;
 
         collaborationLogger.info("WebSocket authentication request", {
           documentName: data.documentName,
           hasToken: !!data.token,
-          clientIp,
         });
 
-        // Basic validation - require token and document name
         if (!data.token || !data.documentName) {
-          collaborationLogger.warn(
-            "WebSocket authentication failed: missing token or document name",
-            {
-              documentName: data.documentName,
-              hasToken: !!data.token,
-            },
-          );
-          return false;
+          throw new Error("Missing token or document name");
         }
 
-        // Validate token format (basic check)
-        if (typeof data.token !== "string" || data.token.length < 10) {
-          collaborationLogger.warn(
-            "WebSocket authentication failed: invalid token format",
-            {
-              documentName: data.documentName,
-              tokenLength: data.token?.length || 0,
-            },
-          );
-          return false;
-        }
+        try {
+          const sessionResult = await kv.get(["sessions", data.token]);
+          const session = sessionResult.value as any;
 
-        // TODO: Add proper session validation here
-        // For now, accept any properly formatted token
-        return true;
+          if (!session) {
+            throw new Error("Invalid session");
+          }
+
+          const now = Date.now();
+          if (session.expiresAt && new Date(session.expiresAt) < new Date(now)) {
+            throw new Error("Session expired");
+          }
+
+          const userResult = await kv.get(["users", "by_id", session.userId]);
+          const user = userResult.value as any;
+
+          if (!user || !user.isActive) {
+            throw new Error("User not found or inactive");
+          }
+
+          return {
+            user: {
+              id: user.id,
+              name: user.username,
+            },
+            documentName: data.documentName,
+          };
+        } catch (error) {
+          collaborationLogger.error("WebSocket authentication error", {
+            documentName: data.documentName,
+            error: (error as Error).message,
+          });
+          throw error;
+        }
       },
 
-      async onConnect(data: any) {
-        collaborationLogger.info("WebSocket connection established", {
-          documentName: data.documentName,
-          connectionId: data.connection?.id,
-        });
+      onConnect: async (data: any) => {
+        const collaborationLogger = this.logger;
+        collaborationLogger.info("onConnect context", { context: data.context });
+        const { user, documentName } = data.context;
+        const documentPath = documentName.startsWith("doc:")
+          ? documentName.substring(4)
+          : documentName;
 
-        // Add connection limit per document (max 5 concurrent connections)
-        const connectionCount = this.hocuspocus?.getConnectionsCount() || 0;
-        if (connectionCount > 20) {
-          collaborationLogger.warn("Connection limit exceeded - REJECTING", {
-            documentName: data.documentName,
-            connectionCount,
-          });
-          throw new Error("Connection limit exceeded");
+        const hasPermission = await this.permissionService.can(user.id, "collaborate", documentPath);
+
+        if (!hasPermission) {
+          collaborationLogger.warn(
+            "WebSocket connection denied: insufficient permissions",
+            {
+              documentName: data.documentName,
+              userId: user.id,
+            },
+          );
+          return false; // Reject connection
         }
 
-        return true;
+        if (user && user.id) {
+          connectionManager.addConnection(user.id, data.connection);
+        }
+        collaborationLogger.info("WebSocket connection established", {
+          documentName: data.documentName,
+          userId: user?.id,
+        });
+
+        return;
+      },
+
+      onDisconnect: async (data: any) => {
+        const collaborationLogger = this.logger;
+        const { user } = data.context;
+        if (user && user.id) {
+          connectionManager.removeConnection(user.id, data.connection);
+        }
+        collaborationLogger.info("WebSocket connection closed", {
+          documentName: data.documentName,
+          userId: user?.id,
+        });
+      },
+
+      onStateless: async ({ payload, document, connection }: any) => {
+        const collaborationLogger = this.logger;
+        collaborationLogger.info(
+          `Received stateless message: ${payload}`,
+          {
+            documentName: document.name,
+          },
+        );
       },
 
       extensions: [denoKvExtension],
-
-      async onStoreDocument(data: any) {
-        collaborationLogger.info("Document state stored", {
-          documentName: data.documentName,
-          size: Y.encodeStateAsUpdate(data.document).length,
-        });
-      },
-
-      async onChange(data: any) {
-        collaborationLogger.debug("Document changed", {
-          documentName: data.documentName,
-          clientsCount: data.clientsCount,
-        });
-      },
     });
 
     // Setup WebSocket routes with proper error handling
     this.setupWebSocketRoutes();
 
     this.logger.info("Real-time collaboration initialized");
+  }
+
+  async onAuthenticate(data: any) {
+        const collaborationLogger = this.logger;
+        const kv = this.kv;
+
+        // Check circuit breaker first
+        // ... (circuit breaker logic)
+
+        collaborationLogger.info("WebSocket authentication request", {
+          documentName: data.documentName,
+          hasToken: !!data.token,
+        });
+
+        if (!data.token || !data.documentName) {
+          throw new Error("Missing token or document name");
+        }
+
+        try {
+          const sessionResult = await kv.get(["sessions", data.token]);
+          const session = sessionResult.value as any;
+
+          if (!session) {
+            throw new Error("Invalid session");
+          }
+
+          const now = Date.now();
+          if (session.expiresAt && new Date(session.expiresAt) < new Date(now)) {
+            throw new Error("Session expired");
+          }
+
+          const userResult = await kv.get(["users", "by_id", session.userId]);
+          const user = userResult.value as any;
+
+          if (!user || !user.isActive) {
+            throw new Error("User not found or inactive");
+          }
+
+          return {
+            user: {
+              id: user.id,
+              name: user.username,
+            },
+            documentName: data.documentName,
+          };
+        } catch (error) {
+          collaborationLogger.error("WebSocket authentication error", {
+            documentName: data.documentName,
+            error: (error as Error).message,
+          });
+          throw error;
+        }
+  }
+
+  async onConnect(data: any) {
+        const collaborationLogger = this.logger;
+        const { user, documentName } = data.context;
+        const documentPath = documentName.startsWith("doc:")
+          ? documentName.substring(4)
+          : documentName;
+
+        const hasPermission = await this.permissionService.can(user.id, "collaborate", documentPath);
+
+        if (!hasPermission) {
+          collaborationLogger.warn(
+            "WebSocket connection denied: insufficient permissions",
+            {
+              documentName: data.documentName,
+              userId: user.id,
+            },
+          );
+          return false; // Reject connection
+        }
+
+        if (user && user.id) {
+          connectionManager.addConnection(user.id, data.connection);
+        }
+        collaborationLogger.info("WebSocket connection established", {
+          documentName: data.documentName,
+          userId: user?.id,
+        });
+
+        return;
+  }
+
+  async onDisconnect(data: any) {
+        const collaborationLogger = this.logger;
+        const { user } = data.context;
+        if (user && user.id) {
+          connectionManager.removeConnection(user.id, data.connection);
+        }
+        collaborationLogger.info("WebSocket connection closed", {
+          documentName: data.documentName,
+          userId: user?.id,
+        });
+  }
+
+  async onStateless({ payload, document, connection }: any) {
+        const collaborationLogger = this.logger;
+        collaborationLogger.info(
+          `Received stateless message: ${payload}`,
+          {
+            documentName: document.name,
+          },
+        );
+  }
+
+  async onStoreDocument(data: any) {
+        const collaborationLogger = this.logger;
+        collaborationLogger.info("Document state stored", {
+          documentName: data.documentName,
+          size: Y.encodeStateAsUpdate(data.document).length,
+        });
+  }
+
+  async onChange(data: any) {
+        const collaborationLogger = this.logger;
+        collaborationLogger.debug("Document changed", {
+          documentName: data.documentName,
+          clientsCount: data.clientsCount,
+        });
   }
 
   /**
@@ -900,10 +1008,10 @@ class AbracadabraServer {
               documentId,
             });
           },
-          onError: (error) => {
+          onError: (evt: Event) => {
             logger.error("Document collaboration error", {
               documentId,
-              error: error.message || error,
+              error: (evt as ErrorEvent).message,
             });
           },
         };

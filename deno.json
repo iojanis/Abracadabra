@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "lib": ["deno.window", "deno.unstable"],
+    "lib": [
+      "deno.window",
+      "deno.unstable"
+    ],
     "strict": true,
     "noImplicitAny": true,
     "noImplicitReturns": true,
@@ -24,7 +27,8 @@
     "lucia": "npm:lucia@^3.2.1",
     "@casl/ability": "npm:@casl/ability@^6.7.1",
     "logtape": "jsr:@logtape/logtape@^0.7.2",
-    "pg": "npm:pg@^8.11.3"
+    "pg": "npm:pg@^8.11.3",
+    "unstorage": "npm:unstorage@^1.10.1"
   },
   "tasks": {
     "dev": "deno run --allow-net --allow-read --allow-write --allow-env --unstable-kv --watch src/main.ts",
@@ -37,9 +41,14 @@
   },
   "lint": {
     "rules": {
-      "tags": ["recommended"]
+      "tags": [
+        "recommended"
+      ]
     },
-    "exclude": ["dist/", "node_modules/"]
+    "exclude": [
+      "dist/",
+      "node_modules/"
+    ]
   },
   "fmt": {
     "useTabs": false,
@@ -47,12 +56,21 @@
     "indentWidth": 2,
     "singleQuote": false,
     "proseWrap": "preserve",
-    "exclude": ["dist/", "node_modules/"]
+    "exclude": [
+      "dist/",
+      "node_modules/"
+    ]
   },
   "test": {
-    "include": ["tests/"],
-    "exclude": ["tests/fixtures/"]
+    "include": [
+      "tests/"
+    ],
+    "exclude": [
+      "tests/fixtures/"
+    ]
   },
-  "unstable": ["kv"],
+  "unstable": [
+    "kv"
+  ],
   "nodeModulesDir": "auto"
 }

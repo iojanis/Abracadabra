@@ -9,6 +9,7 @@ import { isDenoDeploy, isProduction } from "./environment.ts";
 export interface KvConfig {
   provider: "deno" | "postgres";
   denoKvPath?: string;
+  postgresUrl?: string;
 }
 
 /**
@@ -65,10 +66,12 @@ function getKvConfigFromEnv(): KvConfig {
     denoKvPath = Deno.env.get("DENO_KV_PATH") || "./data/kv.db";
   }
 
-  return {
-    provider,
-    denoKvPath,
-  };
+  const config: KvConfig = { provider };
+  if (denoKvPath) {
+    config.denoKvPath = denoKvPath;
+  }
+
+  return config;
 }
 
 /**

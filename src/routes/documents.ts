@@ -19,6 +19,7 @@ import type {
 } from "../types/index.ts";
 import type { DocumentService } from "../services/documents.ts";
 import type { PermissionService } from "../services/permissions.ts";
+import { connectionManager } from "../services/connectionManager.ts";
 import { getLogger } from "../services/logging.ts";
 
 let logger: ReturnType<typeof getLogger> | null = null;
@@ -154,7 +155,7 @@ export class DocumentRoutes {
           includeChildren,
         });
 
-        let documents;
+        let documents: DocumentMetadataObject[];
 
         if (userId && username) {
           getDocumentRouteLogger().info(
@@ -311,6 +312,15 @@ export class DocumentRoutes {
             userId,
             data as DocumentCreateOptions,
           );
+
+          // Send a notification to the user
+          connectionManager.sendMessage(userId, {
+            type: "notification",
+            payload: {
+              level: "success",
+              message: `Document '${document.title}' created successfully.`,
+            },
+          });
 
           return c.json(
             {

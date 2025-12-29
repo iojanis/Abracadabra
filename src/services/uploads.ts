@@ -65,9 +65,9 @@ export interface StorageProvider {
 export class NoOpStorageProvider implements StorageProvider {
   async store(
     fileId: string,
-    data: Uint8Array,
-    mimeType: string,
-  ): Promise<void> {
+    buffer: Uint8Array,
+    metadata: FileMetadataObject,
+  ): Promise<string> {
     throw new Error(
       "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
     );
@@ -79,10 +79,14 @@ export class NoOpStorageProvider implements StorageProvider {
     );
   }
 
-  async delete(fileId: string): Promise<void> {
+  async delete(fileId: string): Promise<boolean> {
     throw new Error(
       "File uploads are not supported in this environment. Configure S3 storage to enable uploads.",
     );
+  }
+
+  async exists(fileId: string): Promise<boolean> {
+    return Promise.resolve(false);
   }
 
   async getUrl(fileId: string): Promise<string> {
